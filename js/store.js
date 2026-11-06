@@ -26,7 +26,22 @@ function loadDB() {
   if (!db || !db.version) { db = seedDB(); saveDB(); }
   migrate();
   ensureSessions();
+  runMonthlyDue();
   return db;
+}
+// Modo prueba: el día de cobro marca a todos «cuota pendiente» (con servidor lo hace mark_month_due cada mañana).
+// La primera vez solo apunta el mes en curso: empieza a funcionar el mes siguiente.
+function runMonthlyDue() {
+  const s = db.settings;
+  if (s.autoMonthlyDue === false) return;
+  if (new Date().getDate() < (Number(s.autoMonthlyDay) || 1)) return;
+  const mk = monthKey();
+  if (!db.autoDueMonth) { db.autoDueMonth = mk; saveDB(); return; }
+  if (db.autoDueMonth === mk) return;
+  db.autoDueMonth = mk;
+  clients().filter(c => c.active && c.planId && (c.paymentMonth || '') !== mk)
+    .forEach(c => markPaymentDue(c.id, { email: !!s.autoMonthlyEmail, app: true }));
+  saveDB();
 }
 function saveDB() {
   try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) { console.warn('No se pudo guardar', e); }
@@ -109,7 +124,7 @@ function seedDB() {
       id: 'u' + i, name: n, email, phone: '6' + String(10000000 + i * 7654321).slice(0, 8), role: 'client', active: true,
       blocked: i === 7, blockedReason: i === 7 ? 'Cuota de este mes pendiente de pago' : '', weeklyLimit: null, weekExtras: {},
       planId: plan.id, credits: plan.credits,
-      paymentDue: i === 4 || i === 9, paymentMonth: monthKey(), paymentAnswer: i === 9 ? 'leave' : null,
+      paymentDue: i === 4 || i === 9, paymentMonth: i === 4 || i === 9 ? monthKey() : null, paymentAnswer: i === 9 ? 'leave' : null,
       planExpires: null, createdAt: exp(-30 - i * 5),
     });
   });
@@ -363,6 +378,7 @@ function addWeekExtra(userId, d, delta) {
   u.weekExtras = u.weekExtras || {};
   u.weekExtras[k] = (u.weekExtras[k] || 0) + delta;
   if (!u.weekExtras[k]) delete u.weekExtras[k];
+  if (delta > 0) promoteMemberWaitlists(userId);
   saveDB();
 }
 // Pasar las clases no usadas de una semana a la siguiente
@@ -456,6 +472,7 @@ function adminAddToSessions(userId, sessionIds, { whenFull = 'waitlist', mode = 
     if (mode === 'waitlist' || (full && whenFull === 'waitlist')) {
       db.bookings.push({ id: uid(), sessionId: s.id, userId, status: 'waitlist', createdAt: new Date().toISOString(), reminded: false });
       res.waitlist.push(s);
+      if (freeSpots(s) > 0) promoteWaitlist(s.id);   // si hay hueco y ya puede, entra directamente
     } else {
       if (planStatus(u).ok) spendCredit(u);
       db.bookings.push({ id: uid(), sessionId: s.id, userId, status: 'booked', createdAt: new Date().toISOString(), reminded: false });
@@ -490,6 +507,7 @@ function cancelBooking(bookingId) {
   if (!late) refundCredit(u);
   else msg = `Reserva cancelada fuera de plazo (menos de ${db.settings.cancelHours} h): la clase cuenta como gastada.`;
   promoteWaitlist(s.id);
+  promoteMemberWaitlists(u.id);   // si esperaba en otra clase, ahora quizá ya puede entrar
   saveDB();
   return { ok: true, msg };
 }
@@ -503,7 +521,7 @@ function adminRemoveBooking(bookingId, { email = false, app = true } = {}) {
   const txt = wasWait ? `El centro te ha quitado de la lista de espera de ${classLabel(s)}.` : `El centro ha anulado tu reserva de ${classLabel(s)}. Se te ha devuelto la clase.`;
   if (app) notify(u.id, txt, 'warn');
   if (email) sendEmail(u.id, 'Cambio en tu reserva', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
-  if (!wasWait) promoteWaitlist(s.id);
+  if (!wasWait) { promoteWaitlist(s.id); promoteMemberWaitlists(u.id); }
   saveDB();
 }
 
@@ -511,9 +529,10 @@ function adminRemoveBooking(bookingId, { email = false, app = true } = {}) {
 function promoteWaitlist(sessionId) {
   const s = getSession(sessionId);
   if (!s || s.cancelled || sessionStart(s) <= new Date()) return;
-  const wl = waitlistOf(sessionId);
-  while (freeSpots(s) > 0 && wl.length) {
-    const b = wl.shift();
+  // entra el primero de la lista que PUEDA entrar; quien aún no puede sigue esperando
+  for (const b of waitlistOf(sessionId)) {
+    if (freeSpots(s) <= 0) break;
+    if (b.status !== 'waitlist') continue;
     const u = getUser(b.userId);
     const cu = canUseFor(u, s);
     if (cu.ok) {
@@ -523,12 +542,15 @@ function promoteWaitlist(sessionId) {
       const extra = removed.length ? `\n\nComo ya no te quedan clases libres para ello, te hemos quitado de la lista de espera de:\n${removed.map(classLabel).join('\n')}` : '';
       notify(u.id, `🎉 ¡Se ha liberado una plaza! Ya tienes reserva en ${classLabel(s)}.`, 'success');
       if (db.settings.emailOnPromote) sendEmail(u.id, '¡Has entrado en la clase!', `Hola ${u.name.split(' ')[0]},\n\nSe ha liberado una plaza y has pasado de la lista de espera a la clase:\n${classLabel(s)}${extra}\n\nSi no puedes asistir, quítate desde la app.\n\n${db.settings.centerName}`);
-    } else {
-      // no puede entrar (p. ej. ya gastó sus clases de la semana): sale de esta lista y pasa el siguiente
-      b.status = 'cancelled';
-      notify(u.id, `Se liberó una plaza en ${classLabel(s)} pero no has podido entrar: ${cu.msg}`, 'warn');
     }
   }
+}
+// Cuando a un cliente se le libera una clase, se miran sus listas de espera por orden
+function promoteMemberWaitlists(userId) {
+  const now = new Date();
+  db.bookings.filter(b => b.userId === userId && b.status === 'waitlist')
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .forEach(b => { const s = getSession(b.sessionId); if (s && !s.cancelled && sessionStart(s) > now) promoteWaitlist(s.id); });
 }
 
 // ---------- Administración de sesiones ----------
@@ -661,6 +683,7 @@ function unblockUser(userId, email = true) {
   const u = getUser(userId);
   u.blocked = false; u.blockedReason = '';
   syncGroups(userId);
+  promoteMemberWaitlists(userId);
   notify(userId, '🔓 Tu cuenta vuelve a estar activa. Ya puedes reservar.', 'success');
   if (email) sendEmail(userId, 'Cuenta desbloqueada', `Hola ${u.name.split(' ')[0]},\n\nTu cuenta vuelve a estar activa. Ya puedes reservar tus clases.\n\n${db.settings.centerName}`);
   saveDB();
@@ -705,6 +728,7 @@ function assignPlan(userId, planId) {
   u.credits = p.type === 'weekly' ? null : p.credits;
   u.planExpires = null;   // la cuota es mensual: la tarifa no caduca
   syncGroups(userId);
+  promoteMemberWaitlists(userId);
   notify(u.id, `✅ Tu tarifa ahora es: ${p.name}.`, 'success');
   saveDB();
 }

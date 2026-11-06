@@ -225,7 +225,11 @@
   }
 
   // ---------- Acceso ----------
-  let loginStep = { email: '', mode: 'code', sent: false };
+  // El acceso con contraseña (administrador) solo aparece en la dirección …/#admin
+  const adminEntry = () => /^#admin/i.test(location.hash) || new URLSearchParams(location.search).has('admin');
+  const freshStep = () => ({ email: '', mode: adminEntry() ? 'password' : 'code', sent: false });
+  let loginStep = freshStep();
+  window.addEventListener('hashchange', () => { if (!role) { loginStep = freshStep(); renderLogin(); } });
   window.renderLogin = function () {
     const b = brand();
     const s = loginStep;
@@ -241,7 +245,7 @@
             <button class="btn primary block" type="submit">Entrar</button>
           </form>
           <div class="row between wrap" style="margin-top:14px">
-            <button class="btn ghost sm" data-a="login-mode" data-m="code">← Soy cliente</button>
+            <button class="btn ghost sm" data-a="login-mode" data-m="code">Entrar con un código</button>
             <button class="btn ghost sm" data-a="login-forgot">He olvidado la contraseña</button>
           </div>`
         : !s.sent ? `
@@ -250,8 +254,8 @@
             <div class="field"><label>Email</label><input name="email" type="email" required autocomplete="email" inputmode="email" value="${esc(s.email)}" placeholder="tu@email.com"></div>
             <button class="btn primary block" type="submit">Enviarme el código</button>
           </form>
-          <p class="muted small" style="margin-top:12px">Usa el email que diste en el centro.</p>
-          <div style="margin-top:8px;text-align:right"><button class="btn ghost sm" data-a="login-mode" data-m="password">Acceso del centro</button></div>`
+          <p class="muted small" style="margin-top:12px">Usa el email que diste en el centro. Solo tendrás que hacerlo una vez en cada móvil: la app recuerda tu sesión.</p>
+          ${adminEntry() ? '<div style="margin-top:8px;text-align:right"><button class="btn ghost sm" data-a="login-mode" data-m="password">Entrar con contraseña</button></div>' : ''}`
         : `
           <p class="muted">Te hemos enviado un código a <b>${esc(s.email)}</b>. Mira también en «Spam» o «Promociones».</p>
           <form data-form="login-code-verify">
@@ -265,12 +269,23 @@
       </div></div>`;
   };
 
+  // Pantalla de «sin conexión»: NUNCA se cierra la sesión por un error; se reintenta
+  function renderOffline(msg) {
+    $('#app').innerHTML = `<div class="login"><div class="card" style="text-align:center">
+      <div class="login-logo" style="display:flex;justify-content:center">${brandMark(56)}</div>
+      <h2 style="margin-bottom:8px">No hemos podido conectar</h2>
+      <p class="muted">Comprueba tu conexión a internet. Tu sesión sigue abierta.</p>
+      <p class="muted small">${esc(msg || '')}</p>
+      <button class="btn primary block" data-a="retry-load">Reintentar</button></div></div>`;
+  }
   async function afterSignIn() {
     const { data, error } = await sb.rpc('claim_member');
-    if (error || !data) {
+    if (error) throw error;                       // error de conexión: se reintenta, no se cierra la sesión
+    if (!data) {
+      // el email no está dado de alta (o la ficha está desactivada): solo entonces se sale
       await sb.auth.signOut();
-      toast(error ? 'Error al entrar: ' + error.message : 'Ese email no está dado de alta en el centro. Pregunta en recepción.', 'err');
-      loginStep = { email: '', mode: 'code', sent: false };
+      toast('Ese email no está dado de alta en el centro. Pregunta en recepción.', 'err');
+      loginStep = freshStep();
       return renderLogin();
     }
     role = data.role;
@@ -287,6 +302,10 @@
 
   Object.assign(actions, {
     'login-mode': d => { loginStep = { ...loginStep, mode: d.m, sent: false }; renderLogin(); },
+    'retry-load': async () => {
+      $('#app').innerHTML = '<div class="login"><div class="card" style="text-align:center">Cargando…</div></div>';
+      try { await afterSignIn(); } catch (e) { renderOffline(e.message); }
+    },
     'login-back': () => { loginStep.sent = false; renderLogin(); },
     'login-resend': async () => {
       const { error } = await sb.auth.signInWithOtp({ email: loginStep.email, options: { shouldCreateUser: true } });
@@ -312,13 +331,13 @@
       const token = f.get('code').replace(/\s/g, '');
       const { error } = await sb.auth.verifyOtp({ email: loginStep.email, token, type: 'email' });
       if (error) return toast('Código incorrecto o caducado. Pide uno nuevo.', 'err');
-      await afterSignIn();
+      try { await afterSignIn(); } catch (e) { renderOffline(e.message); }
     },
     'login-pass': async f => {
       const email = f.get('email').trim();
       const { error } = await sb.auth.signInWithPassword({ email, password: f.get('password') });
       if (error) return toast('Email o contraseña incorrectos', 'err');
-      await afterSignIn();
+      try { await afterSignIn(); } catch (e) { renderOffline(e.message); }
     },
     'new-password': async f => {
       const { error } = await sb.auth.updateUser({ password: f.get('password') });
@@ -332,7 +351,7 @@
     if (channel) sb.removeChannel(channel);
     await sb.auth.signOut();
     role = null; state.userId = null; closeModal();
-    loginStep = { email: '', mode: 'code', sent: false };
+    loginStep = freshStep();
     renderLogin();
   };
 
@@ -351,8 +370,10 @@
         <form data-form="new-password"><div class="field"><label>Contraseña nueva</label><input name="password" type="password" minlength="8" required autocomplete="new-password"></div>
         <button class="btn primary block" type="submit">Guardar</button></form>`), 300);
     });
-    const { data: { session } } = await sb.auth.getSession();
-    if (session) { try { await afterSignIn(); } catch (e) { console.error(e); toast('Error al cargar: ' + e.message, 'err'); renderLogin(); } }
+    let session = null;
+    try { ({ data: { session } } = await sb.auth.getSession()); } catch (e) { console.error(e); }
+    // hay sesión guardada → se entra directamente (sin pedir código). Si falla la conexión, se reintenta.
+    if (session) { try { await afterSignIn(); } catch (e) { console.error(e); renderOffline(e.message); } }
     else renderLogin();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
     // por si se pierde el tiempo real (móvil en reposo): refresco al volver a la app y cada 2 minutos

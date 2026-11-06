@@ -235,6 +235,7 @@ function viewClientBook() {
         else if (b?.status === 'waitlist') {
           act = `<button class="btn sm" data-a="cancel-booking" data-id="${b.id}">Salir de la lista</button>`;
           extra = `<div class="wl-pos">En lista de espera · vas el <b>nº ${waitlistPosition(b)}</b></div>`;
+          if (!canUseFor(u, s).ok) extra += `<div class="muted small" style="margin-top:4px">Entrarás en cuanto te quites de otra clase ${db.settings.onePerDay && db.bookings.some(x => x.userId === u.id && x.status === 'booked' && getSession(x.sessionId)?.date === s.date) ? 'de ese día' : 'de esa semana'}.</div>`;
         }
         else if (started) act = '<span class="pill">Finalizada</span>';
         else if (ps.blocked) act = '<span class="pill">Bloqueado</span>';
@@ -911,6 +912,14 @@ function viewAdminSettings() {
       <label class="check"><input type="checkbox" name="onePerDay" ${s.onePerDay ? 'checked' : ''}> Máximo una clase al día por cliente</label>
       <label class="check"><input type="checkbox" name="waitlistEnabled" ${s.waitlistEnabled ? 'checked' : ''}> Activar lista de espera automática</label>
       <label class="check"><input type="checkbox" name="emailOnPromote" ${s.emailOnPromote ? 'checked' : ''}> ✉️ Enviar correo cuando alguien entra desde la lista de espera (la notificación en la app se envía siempre)</label>
+
+      <div class="section-h">Cuota mensual</div>
+      <label class="check"><input type="checkbox" name="autoMonthlyDue" ${s.autoMonthlyDue !== false ? 'checked' : ''}> 💶 Marcar a todos los socios «cuota pendiente» automáticamente cada mes</label>
+      <div class="fields-2">
+        <div class="field"><label>Día del mes en que se marca</label><input name="autoMonthlyDay" type="number" min="1" max="28" value="${s.autoMonthlyDay || 1}"></div>
+      </div>
+      <label class="check"><input type="checkbox" name="autoMonthlyEmail" ${s.autoMonthlyEmail ? 'checked' : ''}> ✉️ Avisar también por correo (si no, solo en la app)</label>
+      <p class="muted small" style="margin-top:-4px">Les sale el aviso «¿Sigues con nosotros?» y tú ves las respuestas en Hoy. A quien ya hayas marcado como pagado ese mes no se le vuelve a marcar. Empieza a funcionar el mes que viene.</p>
       <button class="btn primary" type="submit">Guardar ajustes</button>
     </form>
     <div class="page-title" style="margin-top:26px"><h1 style="font-size:18px">Correos enviados</h1><button class="btn sm" data-a="emails">Ver bandeja (${db.emails.length})</button></div>
@@ -1237,6 +1246,7 @@ const forms = {
       reminderHours: Number(f.get('reminderHours')), waitlistMax: Number(f.get('waitlistMax')), waitlistEnabled: f.get('waitlistEnabled') === 'on',
       publishMode: f.get('publishMode'), publishWeekday: Number(f.get('publishWeekday')), publishTime: f.get('publishTime') || '20:00',
       weeklyLimit: Number(f.get('weeklyLimit')), emailOnPromote: f.get('emailOnPromote') === 'on', onePerDay: f.get('onePerDay') === 'on',
+      autoMonthlyDue: f.get('autoMonthlyDue') === 'on', autoMonthlyDay: Math.min(28, Math.max(1, Number(f.get('autoMonthlyDay')) || 1)), autoMonthlyEmail: f.get('autoMonthlyEmail') === 'on',
     });
     saveDB();
     ensureSessions(); toast('Ajustes guardados', 'ok'); render();
