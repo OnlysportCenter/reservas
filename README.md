@@ -94,6 +94,14 @@ Figtree, como la web. Los datos de ejemplo usan los turnos reales de la web.
 ficha («Todos los días de las 19:30»). Clases › «Un color por turno» los reparte automáticamente.
 Se ve en el horario, el calendario, la agenda y la app de los socios.
 
+**Acceso del administrador:** solo por `reservas.onlysportcenter.es/#admin` (email + contraseña).
+Los socios solo ven el acceso con código. La sesión se guarda: no se cierra nunca por un error de
+conexión (sale «No hemos podido conectar · Reintentar»).
+
+**Lista de espera:** quien está en espera y aún no puede entrar (semana completa u otra clase ese día)
+sigue esperando; en cuanto se quita de otra clase entra solo si hay hueco. El servidor repasa además
+todas las listas cada 15 minutos.
+
 ## Modo servidor (Supabase + GitHub Pages + Gmail)
 - Si `js/config.js` tiene la dirección y la clave pública de Supabase, la app usa el servidor:
   clientes entran con un código de 6 cifras al email; el administrador con email y contraseña.
