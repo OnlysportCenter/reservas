@@ -252,9 +252,9 @@
           <p class="muted small" style="margin-top:12px">Usa el email que diste en el centro.</p>
           <div style="margin-top:8px;text-align:right"><button class="btn ghost sm" data-a="login-mode" data-m="password">Acceso del centro</button></div>`
         : `
-          <p class="muted">Te hemos enviado un código de 6 cifras a <b>${esc(s.email)}</b>. Mira también en «Spam» o «Promociones».</p>
+          <p class="muted">Te hemos enviado un código a <b>${esc(s.email)}</b>. Mira también en «Spam» o «Promociones».</p>
           <form data-form="login-code-verify">
-            <div class="field"><label>Código</label><input name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" style="font-size:24px;letter-spacing:6px;text-align:center"></div>
+            <div class="field"><label>Código</label><input name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Código" style="font-size:24px;letter-spacing:6px;text-align:center"></div>
             <button class="btn primary block" type="submit">Entrar</button>
           </form>
           <div class="row between wrap" style="margin-top:14px">
