@@ -1,0 +1,653 @@
+// ============================================================
+//  CAPA DE DATOS (prototipo: guarda todo en localStorage)
+//  Más adelante se sustituirá por un servidor/base de datos real
+//  manteniendo estas mismas funciones.
+// ============================================================
+
+const DB_KEY = 'reservas_centro_db_v1';
+let db = null;
+
+const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+// ---------- Fechas ----------
+const pad = n => String(n).padStart(2, '0');
+const dateKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const startOfDay = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const parseKey = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const sessionStart = s => { const [h, m] = s.time.split(':').map(Number); const d = parseKey(s.date); d.setHours(h, m, 0, 0); return d; };
+const sessionEnd = s => new Date(sessionStart(s).getTime() + s.duration * 60000);
+// Semana de lunes a domingo
+const weekStart = d => { const x = startOfDay(d); const off = (x.getDay() + 6) % 7; return addDays(x, -off); };
+
+// ---------- Carga / guardado ----------
+function loadDB() {
+  try { db = JSON.parse(localStorage.getItem(DB_KEY)); } catch (e) { db = null; }
+  if (!db || !db.version) { db = seedDB(); saveDB(); }
+  migrate();
+  ensureSessions();
+  return db;
+}
+function saveDB() {
+  try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) { console.warn('No se pudo guardar', e); }
+}
+function resetDB() { localStorage.removeItem(DB_KEY); db = null; return loadDB(); }
+
+// Añade campos nuevos a datos guardados con versiones anteriores
+function migrate() {
+  const s = db.settings;
+  const def = { publishMode: 'rolling', publishWeekday: 0, publishTime: '20:00', weeklyLimit: 0, emailOnPromote: true, onePerDay: true };
+  let changed = false;
+  for (const k in def) if (s[k] === undefined) { s[k] = def[k]; changed = true; }
+  if (!db.emails) { db.emails = []; changed = true; }
+  db.users.forEach(u => { if (u.blocked === undefined) { u.blocked = false; u.blockedReason = ''; u.weeklyLimit = null; changed = true; } });
+  db.users.forEach(u => { if (!u.weekExtras) { u.weekExtras = {}; changed = true; } });
+  db.users.forEach(u => { if (u.paymentDue === undefined) { u.paymentDue = false; u.paymentAnswer = null; changed = true; } });
+  if (!db.prospects) { db.prospects = []; changed = true; }
+  db.plans.forEach(p => { if (!p.type) { p.type = 'bono'; p.perWeek = null; changed = true; } });
+  if (!db.plans.some(p => p.type === 'weekly')) {
+    db.plans.unshift({ id: 'w2', name: '2 días por semana', type: 'weekly', perWeek: 2, credits: null, durationDays: 30, price: 50 },
+      { id: 'w3', name: '3 días por semana', type: 'weekly', perWeek: 3, credits: null, durationDays: 30, price: 65 });
+    changed = true;
+  }
+  db.classTypes.forEach(c => { if (c.hidden === undefined) { c.hidden = false; changed = true; } });
+  db.schedule.forEach(t => { if (!t.members) { t.members = []; changed = true; } });
+  if (!s.brand) { s.brand = { logo: null, primary: '#0E0E0D', theme: 'light', subtitle: 'Center' }; changed = true; }
+  if (s.centerName === 'Mi Box CrossFit') { s.centerName = 'Onlysport Center'; changed = true; }
+  // aforo real de Onlysport: 20 plazas por turno
+  const fun = db.classTypes.find(c => c.id === 'ct_fun');
+  if (fun && fun.capacity === 10) {
+    fun.capacity = 20;
+    db.sessions.filter(x => x.classTypeId === 'ct_fun' && x.capacity === 10).forEach(x => x.capacity = 20);
+    changed = true;
+  }
+  db.sessions.forEach(x => { if (x.hidden === undefined) { x.hidden = false; changed = true; } });
+  if (changed) saveDB();
+}
+
+// ---------- Datos de ejemplo ----------
+function seedDB() {
+  // type 'weekly': X clases cada semana (lunes a domingo), no se acumulan
+  // type 'bono':   X clases en total hasta la caducidad (opcional, p. ej. clase suelta)
+  const plans = [
+    { id: 'w2', name: '2 días por semana', type: 'weekly', perWeek: 2, credits: null, durationDays: 30, price: 50 },
+    { id: 'w3', name: '3 días por semana', type: 'weekly', perWeek: 3, credits: null, durationDays: 30, price: 65 },
+    { id: 'p1', name: 'Clase suelta', type: 'bono', perWeek: null, credits: 1, durationDays: 15, price: 12 },
+  ];
+  // Onlysport Center: entrenamiento funcional en grupos reducidos, sesiones de 1 hora
+  const classTypes = [
+    { id: 'ct_fun', name: 'Entrenamiento funcional', color: '#2F5D8A', coach: 'Entrenador', capacity: 20, duration: 60, description: 'Fuerza, resistencia y movilidad en grupo reducido, guiado por entrenador.', hidden: false },
+  ];
+  const schedule = [];
+  // members = clientes del grupo fijo: se les reserva automáticamente cada semana
+  const slot = (weekdays, time, ct = 'ct_fun') => weekdays.forEach(w => schedule.push({ id: uid(), weekday: w, time, classTypeId: ct, members: [] }));
+  // Turnos de la web de Onlysport (L=1, M=2, X=3, J=4, V=5)
+  slot([1, 3, 5], '09:15');
+  slot([2, 4], '09:15');
+  slot([1, 3, 5], '10:30');
+  slot([1, 3, 5], '17:30');
+  slot([1, 3, 5], '18:30');
+  slot([2, 4], '18:30');
+  slot([1, 2, 4], '19:30');
+  slot([1, 2, 4], '20:30');
+  slot([1, 2, 4], '21:30');
+
+  const today = startOfDay(new Date());
+  const exp = n => dateKey(addDays(today, n));
+  const names = ['Laura Gómez', 'Carlos Ruiz', 'Ana Martín', 'Javier López', 'Lucía Sánchez', 'Pablo Díaz', 'Elena Torres',
+    'Sergio Navarro', 'Marina Gil', 'David Romero', 'Sara Molina', 'Raúl Castro', 'Irene Ortega', 'Hugo Delgado'];
+  const users = [
+    { id: 'admin', name: 'Administrador', email: 'admin@centro.com', phone: '', role: 'admin', active: true, blocked: false, blockedReason: '', weeklyLimit: null, planId: null, credits: 0, planExpires: null, createdAt: exp(-200) },
+  ];
+  names.forEach((n, i) => {
+    const plan = i === 13 ? plans[2] : i >= 11 ? plans[0] : plans[1];
+    const email = n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(' ')[0] + '@demo.com';
+    users.push({
+      id: 'u' + i, name: n, email, phone: '6' + String(10000000 + i * 7654321).slice(0, 8), role: 'client', active: true,
+      blocked: i === 7, blockedReason: i === 7 ? 'Cuota de este mes pendiente de pago' : '', weeklyLimit: null, weekExtras: {},
+      planId: plan.id, credits: plan.credits,
+      paymentDue: i === 4 || i === 9, paymentMonth: monthKey(), paymentAnswer: i === 9 ? 'leave' : null,
+      planExpires: exp(i === 3 ? 3 : 10 + i), createdAt: exp(-30 - i * 5),
+    });
+  });
+
+  db = {
+    version: 2,
+    settings: {
+      centerName: 'Onlysport Center',
+      brand: { logo: null, primary: '#0E0E0D', theme: 'light', subtitle: 'Center' },
+      cancelHours: 2,          // horas mínimas para cancelar con devolución
+      publishMode: 'rolling',  // 'rolling' = X días por delante | 'weekly' = se publica la semana siguiente un día y hora fijos
+      bookWindowDays: 7,       // modo rolling: días visibles/reservables por delante
+      publishWeekday: 0,       // modo weekly: día en que se publica la semana siguiente (0 = domingo)
+      publishTime: '20:00',    // modo weekly: hora de publicación
+      weeklyLimit: 0,          // solo bonos por nº de clases: máximo por semana (0 = sin límite)
+      onePerDay: true,         // como máximo una clase al día por cliente
+      reminderHours: 3,
+      waitlistEnabled: true,
+      waitlistMax: 5,
+      emailOnPromote: true,    // correo al entrar desde la lista de espera
+    },
+    plans, classTypes, schedule, users,
+    sessions: [], bookings: [], emails: [],
+    prospects: [
+      { id: uid(), name: 'Rocío', lastName: 'Fernández Luque', phone: '611 223 344', email: 'rocio@demo.com', note: 'Prefiere tardes', createdAt: addDays(new Date(), -6).toISOString() },
+      { id: uid(), name: 'Antonio', lastName: 'Jiménez', phone: '622 334 455', email: '', note: '', createdAt: addDays(new Date(), -2).toISOString() },
+    ],
+    announcements: [
+      { id: uid(), title: '¡Bienvenid@s a la nueva app de Onlysport!', body: 'Tu turno ya está reservado cada semana. Si un día no puedes venir, quítate de la clase para dejar el hueco libre, y si quieres, cámbiate a otro turno con plazas o apúntate a su lista de espera.', date: new Date().toISOString(), pinned: true },
+      { id: uid(), title: 'Ejemplo · Horario de Navidad', body: 'Así se verá un aviso del centro. Los escribes desde la pestaña Tablón de tu panel y a todos les llega una notificación.', date: addDays(new Date(), -1).toISOString(), pinned: false },
+    ],
+    notifications: [],
+  };
+  // Grupos fijos de ejemplo
+  const join = (uidx, days, time) => days.forEach(w => schedule.find(x => x.weekday === w && x.time === time).members.push('u' + uidx));
+  [0, 1, 2, 3, 4, 5, 6, 8, 9, 10].forEach(i => join(i, [1, 2, 4], '19:30'));  // turno L-M-J 19:30 (10 de 20)
+  join(7, [1, 3, 5], '18:30');                                               // cliente bloqueado
+  [11, 12].forEach(i => join(i, [2, 4], '18:30'));                           // 2 días: M-J 18:30
+  ensureSessions();
+  return db;
+}
+
+// ---------- Generación de sesiones a partir del horario semanal ----------
+function ensureSessions() {
+  const today = startOfDay(new Date());
+  const horizon = Math.max(db.settings.bookWindowDays, 14) + 7;
+  const existing = new Set(db.sessions.filter(s => s.templateId).map(s => s.templateId + '|' + s.date));
+  let added = false;
+  for (let d = 0; d <= horizon; d++) {
+    const date = addDays(today, d);
+    const key = dateKey(date);
+    const wd = date.getDay();
+    db.schedule.filter(t => t.weekday === wd).forEach(t => {
+      if (existing.has(t.id + '|' + key)) return;
+      const ct = getClassType(t.classTypeId);
+      if (!ct) return;
+      const s = { id: uid(), templateId: t.id, classTypeId: ct.id, date: key, time: t.time, duration: ct.duration, capacity: ct.capacity, coach: ct.coach, cancelled: false, hidden: false };
+      db.sessions.push(s);
+      (t.members || []).forEach(m => groupBook(m, s));
+      added = true;
+    });
+  }
+  if (added) saveDB();
+}
+
+// ---------- Grupos fijos ----------
+// Reserva automática de un miembro del grupo en una sesión (si no tiene ya ningún registro en ella:
+// si se quitó de esa clase concreta, no se le vuelve a apuntar)
+function groupBook(userId, s) {
+  const u = getUser(userId);
+  if (!u || !u.active || !planStatus(u).ok) return false;
+  if (sessionStart(s) <= new Date() || s.cancelled) return false;
+  // las reservas quitadas por un bloqueo o al salir del grupo no impiden volver a reservar
+  // (pero si el cliente se quitó él mismo de ese día, se respeta)
+  if (db.bookings.some(b => b.userId === userId && b.sessionId === s.id && !b.blockRemoved && !b.groupRemoved)) return false;
+  spendCredit(u);
+  db.bookings.push({ id: uid(), sessionId: s.id, userId, status: 'booked', source: 'group', createdAt: new Date(0).toISOString(), reminded: false });
+  return true;
+}
+const getSlot = id => db.schedule.find(t => t.id === id);
+const slotLabel = t => `${DOW_LONG[t.weekday]} ${t.time} · ${getClassType(t.classTypeId)?.name}`;
+const groupsOf = userId => db.schedule.filter(t => (t.members || []).includes(userId)).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7) || a.time.localeCompare(b.time));
+function addGroupMember(slotId, userId, { email = true, app = true } = {}) {
+  const t = getSlot(slotId), u = getUser(userId);
+  if (!t.members.includes(userId)) t.members.push(userId);
+  let n = 0;
+  db.sessions.filter(s => s.templateId === slotId).forEach(s => { if (groupBook(userId, s)) n++; });
+  const txt = `El centro te ha apuntado al grupo fijo de ${slotLabel(t)}. Tendrás plaza reservada cada semana; si algún día no puedes venir, quítate desde la app.`;
+  if (app) notify(userId, '📅 ' + txt, 'success');
+  if (email) sendEmail(userId, 'Te hemos apuntado a un grupo', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  saveDB();
+  return n;
+}
+// Vuelve a reservar los grupos de un cliente (p. ej. al desbloquearlo o renovar su cuota)
+function syncGroups(userId) {
+  let n = 0;
+  groupsOf(userId).forEach(t => db.sessions.filter(s => s.templateId === t.id).forEach(s => { if (groupBook(userId, s)) n++; }));
+  return n;
+}
+function removeGroupMember(slotId, userId, { removeFuture = true, email = false, app = true } = {}) {
+  const t = getSlot(slotId), u = getUser(userId);
+  t.members = t.members.filter(m => m !== userId);
+  let n = 0;
+  if (removeFuture) {
+    db.bookings.filter(b => b.userId === userId && b.status === 'booked' && b.source === 'group').forEach(b => {
+      const s = getSession(b.sessionId);
+      if (s && s.templateId === slotId && sessionStart(s) > new Date()) { refundCredit(u); b.status = 'cancelled'; b.groupRemoved = true; promoteWaitlist(s.id); n++; }
+    });
+  }
+  const txt = `Ya no formas parte del grupo fijo de ${slotLabel(t)}.`;
+  if (app) notify(userId, txt, 'info');
+  if (email) sendEmail(userId, 'Cambio en tu grupo', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  saveDB();
+  return n;
+}
+
+// ---------- Publicación (hasta cuándo ven los clientes las clases) ----------
+function visibleUntil(now = new Date()) {
+  const s = db.settings;
+  if (s.publishMode === 'weekly') {
+    const ws = weekStart(now);
+    const [h, m] = s.publishTime.split(':').map(Number);
+    const pub = addDays(ws, (s.publishWeekday + 6) % 7); pub.setHours(h, m, 0, 0);
+    return addDays(ws, now >= pub ? 14 : 7);   // exclusivo
+  }
+  return addDays(startOfDay(now), s.bookWindowDays + 1);
+}
+function publishDescription() {
+  const s = db.settings;
+  if (s.publishMode === 'weekly') return `Las clases de la semana siguiente se publican cada ${DOW_LONG[s.publishWeekday].toLowerCase()} a las ${s.publishTime}.`;
+  return `Puedes ver y reservar clases con hasta ${s.bookWindowDays} días de antelación.`;
+}
+function isHidden(s) { return s.hidden || getClassType(s.classTypeId)?.hidden; }
+function isVisibleToClients(s) { return !isHidden(s) && sessionStart(s) < visibleUntil(); }
+
+// ---------- Consultas ----------
+const getUser = id => db.users.find(u => u.id === id);
+const getPlan = id => db.plans.find(p => p.id === id);
+const getClassType = id => db.classTypes.find(c => c.id === id);
+const getSession = id => db.sessions.find(s => s.id === id);
+const getBooking = id => db.bookings.find(b => b.id === id);
+const clients = () => db.users.filter(u => u.role === 'client');
+const sessionsOn = key => db.sessions.filter(s => s.date === key).sort((a, b) => a.time.localeCompare(b.time));
+const bookedIn = sid => db.bookings.filter(b => b.sessionId === sid && ['booked', 'attended', 'noshow'].includes(b.status));
+const waitlistOf = sid => db.bookings.filter(b => b.sessionId === sid && b.status === 'waitlist').sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+// (con servidor, el cliente recibe su puesto ya calculado en b.waitPosition)
+const waitlistPosition = b => b.waitPosition ?? (waitlistOf(b.sessionId).findIndex(x => x.id === b.id) + 1);
+const userBookingIn = (uid_, sid) => db.bookings.find(b => b.sessionId === sid && b.userId === uid_ && ['booked', 'waitlist', 'attended', 'noshow'].includes(b.status));
+// (con servidor, el cliente no ve las reservas de otros: usa el recuento s.stats)
+const freeSpots = s => Math.max(0, s.capacity - (s.stats ? s.stats.booked : bookedIn(s.id).length));
+
+// Estado general de la tarifa (sin mirar una semana concreta)
+function planStatus(u) {
+  if (u.blocked) return { ok: false, blocked: true, msg: `Tu cuenta está bloqueada${u.blockedReason ? ': ' + u.blockedReason : ''}. Habla con el centro.` };
+  if (!u.planId || !getPlan(u.planId)) return { ok: false, msg: 'No tienes ninguna tarifa activa. Habla con el centro.' };
+  if (u.planExpires && parseKey(u.planExpires) < startOfDay(new Date())) return { ok: false, msg: 'Tu tarifa ha caducado. Habla con el centro para renovarla.' };
+  if (!isWeekly(u) && u.credits !== null && u.credits <= 0) return { ok: false, msg: 'No te quedan clases en tu bono.' };
+  return { ok: true };
+}
+
+// ---------- Tarifas semanales (2 / 3 días por semana) ----------
+// Cada semana (lunes a domingo) el cliente tiene X clases. Lo que no use se pierde,
+// salvo que el administrador le añada clases extra a una semana concreta.
+const isWeekly = u => getPlan(u.planId)?.type === 'weekly';
+const weekKeyOf = d => dateKey(weekStart(d));
+const weekExtra = (u, d) => (u.weekExtras || {})[weekKeyOf(d)] || 0;
+// Clases que cuentan en una semana: reservadas, asistidas, faltas y cancelaciones tardías.
+// Las listas de espera NO cuentan: solo cuenta la clase en la que finalmente entra.
+function weekCount(userId, refDate) {
+  const ws = weekStart(refDate), we = addDays(ws, 7);
+  return db.bookings.filter(b => b.userId === userId && ['booked', 'attended', 'noshow', 'late'].includes(b.status)).filter(b => {
+    const s = getSession(b.sessionId); if (!s || s.cancelled) return false;
+    const d = parseKey(s.date); return d >= ws && d < we;
+  }).length;
+}
+// Límite semanal general (solo para bonos por número de clases)
+const weeklyLimitFor = u => isWeekly(u) ? 0 : ((u.weeklyLimit ?? db.settings.weeklyLimit) || 0);
+// Clases disponibles en la semana de la fecha d (tarifas semanales)
+function weekAllowance(u, d) { return (getPlan(u.planId)?.perWeek || 0) + weekExtra(u, d); }
+function weekLeft(u, d) { return Math.max(0, weekAllowance(u, d) - weekCount(u.id, d)); }
+
+// ¿Puede este cliente gastar una clase en esta sesión concreta?
+function canUseFor(u, s) {
+  const ps = planStatus(u);
+  if (!ps.ok) return ps;
+  const d = parseKey(s.date);
+  if (isWeekly(u)) {
+    if (weekLeft(u, d) <= 0) return { ok: false, msg: `Ya tienes tus ${weekAllowance(u, d)} clases de la semana del ${fmtDateShort(weekKeyOf(d))}. Si quieres cambiarte, quítate primero de otra clase de esa semana.` };
+  } else {
+    const lim = weeklyLimitFor(u);
+    if (lim && weekCount(u.id, d) >= lim) return { ok: false, msg: `Has llegado a tu límite de ${lim} ${lim === 1 ? 'clase' : 'clases'} esa semana.` };
+  }
+  if (db.settings.onePerDay && db.bookings.some(b => b.userId === u.id && ['booked', 'attended', 'noshow'].includes(b.status) && getSession(b.sessionId)?.date === s.date && b.sessionId !== s.id && !getSession(b.sessionId).cancelled))
+    return { ok: false, msg: 'Ya tienes una clase ese día (máximo una clase al día).' };
+  return { ok: true };
+}
+
+// Tras entrar en una clase: quita al cliente de las listas de espera en las que ya no podría entrar
+// (porque ha gastado sus clases de esa semana, ya tiene clase ese día, o se le acabó el bono).
+function cleanupWaitlists(u, enteredSession) {
+  const now = new Date(), removed = [];
+  db.bookings.filter(b => b.userId === u.id && b.status === 'waitlist').forEach(b => {
+    const s = getSession(b.sessionId);
+    if (!s || sessionStart(s) <= now) return;
+    if (!canUseFor(u, s).ok) { b.status = 'cancelled'; removed.push(s); }
+  });
+  if (removed.length) {
+    notify(u.id, `Como ya has entrado en ${classLabel(enteredSession)}, te hemos quitado de la lista de espera de: ${removed.map(classLabel).join('; ')}.`, 'info');
+  }
+  return removed;
+}
+
+// Añadir/quitar clases extra a una semana concreta
+function addWeekExtra(userId, d, delta) {
+  const u = getUser(userId), k = weekKeyOf(d);
+  u.weekExtras = u.weekExtras || {};
+  u.weekExtras[k] = (u.weekExtras[k] || 0) + delta;
+  if (!u.weekExtras[k]) delete u.weekExtras[k];
+  saveDB();
+}
+// Pasar las clases no usadas de una semana a la siguiente
+function carryOverWeek(userId, d, { email = false, app = true } = {}) {
+  const u = getUser(userId);
+  const n = weekLeft(u, d);
+  if (!n) return 0;
+  const next = addDays(weekStart(d), 7);
+  addWeekExtra(userId, next, n);
+  // se restan de la semana de origen para que no se puedan usar ni pasar dos veces
+  const k = weekKeyOf(d);
+  u.weekExtras[k] = (u.weekExtras[k] || 0) - n;
+  if (!u.weekExtras[k]) delete u.weekExtras[k];
+  const txt = `Se te ${n === 1 ? 'ha pasado 1 clase' : `han pasado ${n} clases`} sin usar a la semana del ${fmtDateShort(dateKey(next))}.`;
+  if (app) notify(userId, '➕ ' + txt, 'success');
+  if (email) sendEmail(userId, 'Clases pasadas a la semana siguiente', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  saveDB();
+  return n;
+}
+
+// ---------- Notificaciones y correo ----------
+function notify(userId, text, type = 'info') {
+  db.notifications.push({ id: uid(), userId, text, type, date: new Date().toISOString(), read: false });
+}
+function notificationsFor(userId) {
+  return db.notifications.filter(n => n.userId === userId).sort((a, b) => b.date.localeCompare(a.date));
+}
+// Prototipo: el correo se guarda en una bandeja simulada. Con servidor real se enviará de verdad.
+function sendEmail(userId, subject, body) {
+  const u = getUser(userId);
+  db.emails.push({ id: uid(), userId, to: u.email, subject, body, date: new Date().toISOString() });
+}
+function generateReminders(userId) {
+  const now = new Date();
+  const limit = now.getTime() + db.settings.reminderHours * 3600000;
+  let changed = false;
+  db.bookings.filter(b => b.userId === userId && b.status === 'booked' && !b.reminded).forEach(b => {
+    const s = getSession(b.sessionId);
+    if (!s || s.cancelled) return;
+    const st = sessionStart(s).getTime();
+    if (st > now.getTime() && st <= limit) {
+      b.reminded = true; changed = true;
+      notify(userId, `⏰ Recordatorio: tienes ${getClassType(s.classTypeId).name} hoy a las ${s.time}.`, 'reminder');
+    }
+  });
+  if (changed) saveDB();
+}
+const classLabel = s => `${getClassType(s.classTypeId).name} · ${fmtDateShort(s.date)} a las ${s.time}`;
+
+// ---------- Créditos ----------
+// (en tarifas semanales el consumo se calcula a partir de las reservas de la semana)
+const spendCredit = u => { if (!isWeekly(u) && u.credits !== null) u.credits = Math.max(0, u.credits - 1); };
+const refundCredit = u => { if (!isWeekly(u) && u.credits !== null) u.credits += 1; };
+
+// ---------- Reservar (cliente) ----------
+function book(userId, sessionId) {
+  const u = getUser(userId), s = getSession(sessionId);
+  if (!u || !s) return { ok: false, msg: 'Datos no válidos' };
+  const ps = planStatus(u);
+  if (ps.blocked) return ps;
+  if (userBookingIn(userId, sessionId)) return { ok: false, msg: 'Ya estás apuntad@ a esta clase.' };
+  if (s.cancelled) return { ok: false, msg: 'Esta clase ha sido cancelada.' };
+  if (!isVisibleToClients(s)) return { ok: false, msg: 'Esta clase todavía no está disponible.' };
+  if (sessionStart(s) <= new Date()) return { ok: false, msg: 'Esta clase ya ha empezado.' };
+  const cu = canUseFor(u, s);
+  if (!cu.ok) return cu;
+  if (freeSpots(s) <= 0) {
+    if (!db.settings.waitlistEnabled) return { ok: false, msg: 'La clase está completa.' };
+    if (waitlistOf(s.id).length >= db.settings.waitlistMax) return { ok: false, msg: 'La lista de espera está completa.' };
+    const b = { id: uid(), sessionId, userId, status: 'waitlist', createdAt: new Date().toISOString(), reminded: false };
+    db.bookings.push(b);
+    saveDB();
+    return { ok: true, waitlist: true, msg: `Clase completa: estás el nº ${waitlistPosition(b)} en la lista de espera. Si se libera una plaza entrarás automáticamente y te avisaremos.` };
+  }
+  spendCredit(u);
+  db.bookings.push({ id: uid(), sessionId, userId, status: 'booked', createdAt: new Date().toISOString(), reminded: false });
+  const removed = cleanupWaitlists(u, s);
+  saveDB();
+  return { ok: true, msg: `¡Reserva confirmada! ${classLabel(s)}${removed.length ? ` · Te hemos quitado de ${removed.length} lista(s) de espera.` : ''}` };
+}
+
+// ---------- Apuntar desde administración (una o varias clases) ----------
+// whenFull: 'force' (apuntar aunque supere el aforo) | 'waitlist' (poner en lista de espera)
+// mode: 'auto' (plaza si hay, si no según whenFull) | 'waitlist' (siempre a lista de espera)
+function adminAddToSessions(userId, sessionIds, { whenFull = 'waitlist', mode = 'auto', email = true, app = true } = {}) {
+  const u = getUser(userId);
+  const res = { booked: [], waitlist: [], skipped: [] };
+  sessionIds.map(getSession).filter(Boolean).sort((a, b) => sessionStart(a) - sessionStart(b)).forEach(s => {
+    if (userBookingIn(userId, s.id)) return res.skipped.push(s);
+    const full = freeSpots(s) <= 0;
+    if (mode === 'waitlist' || (full && whenFull === 'waitlist')) {
+      db.bookings.push({ id: uid(), sessionId: s.id, userId, status: 'waitlist', createdAt: new Date().toISOString(), reminded: false });
+      res.waitlist.push(s);
+    } else {
+      if (planStatus(u).ok) spendCredit(u);
+      db.bookings.push({ id: uid(), sessionId: s.id, userId, status: 'booked', createdAt: new Date().toISOString(), reminded: false });
+      res.booked.push(s);
+      cleanupWaitlists(u, s);
+    }
+  });
+  const lines = [];
+  res.booked.forEach(s => lines.push(`✅ ${classLabel(s)}`));
+  res.waitlist.forEach(s => lines.push(`⏳ ${classLabel(s)} (lista de espera, nº ${waitlistPosition(userBookingIn(userId, s.id))})`));
+  if (lines.length) {
+    if (app) notify(userId, `El centro te ha apuntado a:\n${lines.join('\n')}`, 'success');
+    if (email) sendEmail(userId, lines.length > 1 ? `Te hemos apuntado a ${lines.length} clases` : 'Te hemos apuntado a una clase',
+      `Hola ${u.name.split(' ')[0]},\n\nEl centro te ha apuntado a:\n${lines.join('\n')}\n\nPuedes ver tus clases en la app.\n\n${db.settings.centerName}`);
+  }
+  saveDB();
+  return res;
+}
+
+// ---------- Cancelar ----------
+function isLateCancel(s) { return sessionStart(s).getTime() - Date.now() < db.settings.cancelHours * 3600000; }
+function cancelBooking(bookingId) {
+  const b = getBooking(bookingId);
+  if (!b) return { ok: false, msg: 'Reserva no encontrada' };
+  const s = getSession(b.sessionId), u = getUser(b.userId);
+  if (b.status === 'waitlist') { b.status = 'cancelled'; saveDB(); return { ok: true, msg: 'Has salido de la lista de espera.' }; }
+  if (sessionStart(s) <= new Date()) return { ok: false, msg: 'No se puede cancelar una clase que ya ha empezado.' };
+  const late = isLateCancel(s);
+  // Fuera de plazo: la clase cuenta como gastada (estado 'late')
+  b.status = late ? 'late' : 'cancelled';
+  let msg = isWeekly(u) ? 'Reserva cancelada. Recuperas la clase para esa semana.' : 'Reserva cancelada. Se te ha devuelto la clase al bono.';
+  if (!late) refundCredit(u);
+  else msg = `Reserva cancelada fuera de plazo (menos de ${db.settings.cancelHours} h): la clase cuenta como gastada.`;
+  promoteWaitlist(s.id);
+  saveDB();
+  return { ok: true, msg };
+}
+// Quitar a un cliente desde administración (siempre devuelve la clase)
+function adminRemoveBooking(bookingId, { email = false, app = true } = {}) {
+  const b = getBooking(bookingId); if (!b) return;
+  const s = getSession(b.sessionId), u = getUser(b.userId);
+  const wasWait = b.status === 'waitlist';
+  if (!wasWait && b.status === 'booked') refundCredit(u);
+  b.status = 'cancelled';
+  const txt = wasWait ? `El centro te ha quitado de la lista de espera de ${classLabel(s)}.` : `El centro ha anulado tu reserva de ${classLabel(s)}. Se te ha devuelto la clase.`;
+  if (app) notify(u.id, txt, 'warn');
+  if (email) sendEmail(u.id, 'Cambio en tu reserva', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  if (!wasWait) promoteWaitlist(s.id);
+  saveDB();
+}
+
+// Cuando se libera una plaza, entra automáticamente el primero de la lista de espera (por orden)
+function promoteWaitlist(sessionId) {
+  const s = getSession(sessionId);
+  if (!s || s.cancelled || sessionStart(s) <= new Date()) return;
+  const wl = waitlistOf(sessionId);
+  while (freeSpots(s) > 0 && wl.length) {
+    const b = wl.shift();
+    const u = getUser(b.userId);
+    const cu = canUseFor(u, s);
+    if (cu.ok) {
+      spendCredit(u);
+      b.status = 'booked';
+      const removed = cleanupWaitlists(u, s);
+      const extra = removed.length ? `\n\nComo ya no te quedan clases libres para ello, te hemos quitado de la lista de espera de:\n${removed.map(classLabel).join('\n')}` : '';
+      notify(u.id, `🎉 ¡Se ha liberado una plaza! Ya tienes reserva en ${classLabel(s)}.`, 'success');
+      if (db.settings.emailOnPromote) sendEmail(u.id, '¡Has entrado en la clase!', `Hola ${u.name.split(' ')[0]},\n\nSe ha liberado una plaza y has pasado de la lista de espera a la clase:\n${classLabel(s)}${extra}\n\nSi no puedes asistir, quítate desde la app.\n\n${db.settings.centerName}`);
+    } else {
+      // no puede entrar (p. ej. ya gastó sus clases de la semana): sale de esta lista y pasa el siguiente
+      b.status = 'cancelled';
+      notify(u.id, `Se liberó una plaza en ${classLabel(s)} pero no has podido entrar: ${cu.msg}`, 'warn');
+    }
+  }
+}
+
+// ---------- Administración de sesiones ----------
+function cancelSession(sessionId, reason = '', email = true) {
+  const s = getSession(sessionId);
+  s.cancelled = true;
+  db.bookings.filter(b => b.sessionId === sessionId && ['booked', 'waitlist'].includes(b.status)).forEach(b => {
+    if (b.status === 'booked') refundCredit(getUser(b.userId));
+    b.status = 'cancelled';
+    const txt = `❌ La clase ${classLabel(s)} ha sido cancelada${reason ? ': ' + reason : ''}. Se te ha devuelto la clase.`;
+    notify(b.userId, txt, 'warn');
+    if (email) sendEmail(b.userId, 'Clase cancelada', `Hola,\n\n${txt}\n\n${db.settings.centerName}`);
+  });
+  saveDB();
+}
+function restoreSession(sessionId) { getSession(sessionId).cancelled = false; saveDB(); }
+function toggleSessionHidden(sessionId) { const s = getSession(sessionId); s.hidden = !s.hidden; saveDB(); }
+function setAttendance(bookingId, status) { getBooking(bookingId).status = status; saveDB(); }
+function updateSessionCapacity(sessionId, cap) { getSession(sessionId).capacity = cap; promoteWaitlist(sessionId); saveDB(); }
+
+// ---------- Horario semanal ----------
+function addScheduleSlot(weekday, time, classTypeId) { db.schedule.push({ id: uid(), weekday, time, classTypeId, members: [] }); ensureSessions(); saveDB(); }
+function removeScheduleSlot(slotId) {
+  const now = new Date();
+  db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > now).forEach(s => {
+    if (bookedIn(s.id).length || waitlistOf(s.id).length) cancelSession(s.id, 'cambio de horario');
+    else db.sessions = db.sessions.filter(x => x.id !== s.id);
+  });
+  db.schedule = db.schedule.filter(t => t.id !== slotId);
+  saveDB();
+}
+function addOneOffSession(date, time, classTypeId, hidden = false) {
+  const ct = getClassType(classTypeId);
+  db.sessions.push({ id: uid(), templateId: null, classTypeId, date, time, duration: ct.duration, capacity: ct.capacity, coach: ct.coach, cancelled: false, hidden });
+  saveDB();
+}
+function saveClassType(data) {
+  if (data.id) {
+    const ct = getClassType(data.id);
+    Object.assign(ct, data);
+    db.sessions.filter(s => s.classTypeId === ct.id && sessionStart(s) > new Date()).forEach(s => {
+      s.coach = ct.coach; s.duration = ct.duration;
+      if (bookedIn(s.id).length <= ct.capacity) s.capacity = ct.capacity;
+      promoteWaitlist(s.id);
+    });
+  } else {
+    db.classTypes.push({ ...data, id: uid() });
+  }
+  saveDB();
+}
+function deleteClassType(id) {
+  db.schedule.filter(t => t.classTypeId === id).forEach(t => removeScheduleSlot(t.id));
+  db.classTypes = db.classTypes.filter(c => c.id !== id);
+  saveDB();
+}
+
+// ---------- Clientes y bonos ----------
+function saveClient(data) {
+  if (data.email && db.users.some(u => u.email && u.email.toLowerCase() === data.email.toLowerCase() && u.id !== data.id)) return { ok: false, msg: 'Ya existe un usuario con ese email.' };
+  if (data.id) Object.assign(getUser(data.id), data);
+  else db.users.push({ id: uid(), role: 'client', active: true, blocked: false, blockedReason: '', weeklyLimit: null, planId: null, credits: 0, planExpires: null, createdAt: dateKey(new Date()), ...data });
+  saveDB();
+  return { ok: true };
+}
+function blockUser(userId, reason, { cancelFuture = false, email = true } = {}) {
+  const u = getUser(userId);
+  u.blocked = true; u.blockedReason = reason;
+  let n = 0;
+  if (cancelFuture) {
+    db.bookings.filter(b => b.userId === userId && ['booked', 'waitlist'].includes(b.status)).forEach(b => {
+      const s = getSession(b.sessionId);
+      if (s && sessionStart(s) > new Date()) { adminRemoveBooking(b.id, { app: false }); b.blockRemoved = true; n++; }
+    });
+  }
+  const txt = `Tu cuenta ha sido bloqueada${reason ? ': ' + reason : ''}. No podrás reservar hasta que se regularice. Habla con el centro.`;
+  notify(userId, '🔒 ' + txt, 'warn');
+  if (email) sendEmail(userId, 'Cuenta bloqueada', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  saveDB();
+  return n;
+}
+function unblockUser(userId, email = true) {
+  const u = getUser(userId);
+  u.blocked = false; u.blockedReason = '';
+  syncGroups(userId);
+  notify(userId, '🔓 Tu cuenta vuelve a estar activa. Ya puedes reservar.', 'success');
+  if (email) sendEmail(userId, 'Cuenta desbloqueada', `Hola ${u.name.split(' ')[0]},\n\nTu cuenta vuelve a estar activa. Ya puedes reservar tus clases.\n\n${db.settings.centerName}`);
+  saveDB();
+}
+// ---------- Cuota pendiente ----------
+const MONTHS_LONG = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const monthKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+const monthName = key => { const [y, m] = (key || monthKey()).split('-').map(Number); return MONTHS_LONG[m - 1]; };
+function markPaymentDue(userId, { email = false, app = true } = {}) {
+  const u = getUser(userId);
+  u.paymentDue = true; u.paymentMonth = monthKey(); u.paymentAnswer = null; u.paymentAnsweredAt = null;
+  const txt = `Tu cuota de ${monthName(u.paymentMonth)} está pendiente de pago (se paga del 1 al 5 de cada mes). Entra en la app y dinos si sigues con nosotros.`;
+  if (app) notify(userId, '💶 ' + txt, 'warn');
+  if (email) sendEmail(userId, `Cuota de ${monthName(u.paymentMonth)} pendiente`, `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\nSi ya la has pagado, ignora este mensaje.\n\n${db.settings.centerName}`);
+  saveDB();
+}
+function markPaid(userId) {
+  const u = getUser(userId);
+  u.paymentDue = false; u.paymentAnswer = null; u.paymentAnsweredAt = null;
+  saveDB();
+}
+// El cliente responde: 'stay' (sigo) | 'leave' (me doy de baja). Con servidor lo sustituye remote.js.
+function answerPayment(userId, answer) {
+  const u = getUser(userId);
+  if (!u.paymentDue) return { ok: false, msg: 'No tienes ninguna cuota pendiente.' };
+  u.paymentAnswer = answer; u.paymentAnsweredAt = new Date().toISOString();
+  saveDB();
+  return { ok: true, msg: answer === 'stay' ? '¡Genial! Se lo hemos dicho al centro. Recuerda pagar la cuota.' : 'De acuerdo, se lo hemos dicho al centro. ¡Gracias por entrenar con nosotros!' };
+}
+
+// ---------- Lista de espera de clientes nuevos (solo administrador) ----------
+function saveProspect(data) {
+  if (data.id) Object.assign(db.prospects.find(p => p.id === data.id), data);
+  else db.prospects.push({ ...data, id: uid(), createdAt: new Date().toISOString() });
+  saveDB();
+}
+function deleteProspect(id) { db.prospects = db.prospects.filter(p => p.id !== id); saveDB(); }
+
+function assignPlan(userId, planId) {
+  const u = getUser(userId), p = getPlan(planId);
+  u.planId = p.id;
+  u.credits = p.type === 'weekly' ? null : p.credits;
+  u.planExpires = dateKey(addDays(new Date(), p.durationDays));
+  syncGroups(userId);
+  notify(u.id, `✅ Se ha activado tu ${p.name}. Válido hasta el ${fmtDateShort(u.planExpires)}.`, 'success');
+  saveDB();
+}
+function adjustCredits(userId, delta) { const u = getUser(userId); if (u.credits !== null) u.credits = Math.max(0, u.credits + delta); saveDB(); }
+function savePlan(data) { if (data.id) Object.assign(getPlan(data.id), data); else db.plans.push({ ...data, id: uid() }); saveDB(); }
+function deletePlan(id) { db.plans = db.plans.filter(p => p.id !== id); saveDB(); }
+
+// ---------- Tablón ----------
+function saveAnnouncement(data) {
+  if (data.id) Object.assign(db.announcements.find(a => a.id === data.id), data);
+  else {
+    db.announcements.push({ ...data, id: uid(), date: new Date().toISOString() });
+    clients().filter(c => c.active).forEach(c => notify(c.id, `📢 Nuevo anuncio: ${data.title}`, 'info'));
+  }
+  saveDB();
+}
+function deleteAnnouncement(id) { db.announcements = db.announcements.filter(a => a.id !== id); saveDB(); }
+
+// ---------- Formato ----------
+const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const DOW_LONG = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+function fmtDateShort(key) { const d = parseKey(key); return `${DOW[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`; }
+function fmtDateLong(key) { const d = parseKey(key); return `${DOW_LONG[d.getDay()]}, ${d.getDate()} de ${MONTHS[d.getMonth()]}`; }
+function fmtAgo(iso) {
+  const diff = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (diff < 1) return 'ahora';
+  if (diff < 60) return `hace ${Math.floor(diff)} min`;
+  if (diff < 1440) return `hace ${Math.floor(diff / 60)} h`;
+  const d = new Date(iso);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
