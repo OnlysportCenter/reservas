@@ -44,6 +44,7 @@ function migrate() {
   db.users.forEach(u => { if (!u.weekExtras) { u.weekExtras = {}; changed = true; } });
   db.users.forEach(u => { if (u.paymentDue === undefined) { u.paymentDue = false; u.paymentAnswer = null; changed = true; } });
   if (!db.prospects) { db.prospects = []; changed = true; }
+  db.users.forEach(u => { if (u.planExpires) { u.planExpires = null; changed = true; } });   // ya no hay caducidad
   db.plans.forEach(p => { if (!p.type) { p.type = 'bono'; p.perWeek = null; changed = true; } });
   if (!db.plans.some(p => p.type === 'weekly')) {
     db.plans.unshift({ id: 'w2', name: '2 días por semana', type: 'weekly', perWeek: 2, credits: null, durationDays: 30, price: 50 },
@@ -109,7 +110,7 @@ function seedDB() {
       blocked: i === 7, blockedReason: i === 7 ? 'Cuota de este mes pendiente de pago' : '', weeklyLimit: null, weekExtras: {},
       planId: plan.id, credits: plan.credits,
       paymentDue: i === 4 || i === 9, paymentMonth: monthKey(), paymentAnswer: i === 9 ? 'leave' : null,
-      planExpires: exp(i === 3 ? 3 : 10 + i), createdAt: exp(-30 - i * 5),
+      planExpires: null, createdAt: exp(-30 - i * 5),
     });
   });
 
@@ -300,7 +301,6 @@ const freeSpots = s => Math.max(0, s.capacity - (s.stats ? s.stats.booked : book
 function planStatus(u) {
   if (u.blocked) return { ok: false, blocked: true, msg: `Tu cuenta está bloqueada${u.blockedReason ? ': ' + u.blockedReason : ''}. Habla con el centro.` };
   if (!u.planId || !getPlan(u.planId)) return { ok: false, msg: 'No tienes ninguna tarifa activa. Habla con el centro.' };
-  if (u.planExpires && parseKey(u.planExpires) < startOfDay(new Date())) return { ok: false, msg: 'Tu tarifa ha caducado. Habla con el centro para renovarla.' };
   if (!isWeekly(u) && u.credits !== null && u.credits <= 0) return { ok: false, msg: 'No te quedan clases en tu bono.' };
   return { ok: true };
 }
@@ -703,9 +703,9 @@ function assignPlan(userId, planId) {
   const u = getUser(userId), p = getPlan(planId);
   u.planId = p.id;
   u.credits = p.type === 'weekly' ? null : p.credits;
-  u.planExpires = dateKey(addDays(new Date(), p.durationDays));
+  u.planExpires = null;   // la cuota es mensual: la tarifa no caduca
   syncGroups(userId);
-  notify(u.id, `✅ Se ha activado tu ${p.name}. Válido hasta el ${fmtDateShort(u.planExpires)}.`, 'success');
+  notify(u.id, `✅ Tu tarifa ahora es: ${p.name}.`, 'success');
   saveDB();
 }
 function adjustCredits(userId, delta) { const u = getUser(userId); if (u.credits !== null) u.credits = Math.max(0, u.credits + delta); saveDB(); }

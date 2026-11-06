@@ -17,7 +17,6 @@ const IMP_FIELDS = [
   { key: 'phone', label: 'Teléfono', syn: ['telefono', 'tel', 'phone', 'movil', 'mobile', 'celular', 'telefono movil'] },
   { key: 'plan', label: 'Tarifa / cuota', syn: ['tarifa', 'cuota', 'plan', 'abono', 'bono', 'suscripcion', 'membership', 'modalidad', 'tipo de cuota'] },
   { key: 'groups', label: 'Horarios / grupos', syn: ['grupos', 'grupo', 'horario', 'horarios', 'clases', 'clase', 'dias', 'turno', 'turnos', 'schedule'] },
-  { key: 'expires', label: 'Fin de la cuota', syn: ['vencimiento suscripcion', 'fin cuota', 'fin de cuota', 'caducidad', 'vencimiento cuota', 'fecha fin', 'expira', 'valido hasta', 'expiry', 'fecha vencimiento', 'vencimiento'] },
   { key: 'debt', label: 'Deuda', syn: ['deuda', 'debt', 'pendiente de pago', 'importe pendiente'] },
   { key: 'badEmail', label: 'Email inválido (S/N)', syn: ['email invalido', 'invalid email', 'email no valido'] },
 ];
@@ -107,7 +106,7 @@ function guessMapping(cols) {
     if (hit) { map[f.key] = hit[0]; used.add(hit[0]); }
   });
   // 2ª pasada: el título contiene la palabra (los más específicos primero, p. ej. "fecha fin cuota" antes que "cuota")
-  ['badEmail', 'debt', 'expires', 'groups', 'phone', 'email', 'alias', 'last2', 'last', 'name', 'plan'].forEach(k => {
+  ['badEmail', 'debt', 'groups', 'phone', 'email', 'alias', 'last2', 'last', 'name', 'plan'].forEach(k => {
     if (map[k]) return;
     const f = IMP_FIELDS.find(x => x.key === k);
     const hit = n.find(([c, nc]) => !used.has(c) && f.syn.some(s => s.length > 3 && nc.includes(norm(s))));
@@ -344,8 +343,8 @@ function runImport() {
       const plan = getPlan(planId);
       u.planId = plan.id;
       u.credits = plan.type === 'weekly' ? null : plan.credits;
-      u.planExpires = p.expires || u.planExpires || dateKey(addDays(new Date(), plan.durationDays));
-    } else if (p.expires) u.planExpires = p.expires;
+      u.planExpires = null;   // cuota mensual: la tarifa no caduca
+    }
     p.groups.slots.forEach(sid => {
       const t = getSlot(sid);
       if (!t.members.includes(u.id)) { t.members.push(u.id); res.groups++; }
@@ -368,10 +367,10 @@ function runImport() {
 }
 
 function downloadTemplate() {
-  const csv = '﻿nombre;apellidos;email;telefono;tarifa;horarios;fin_cuota\n' +
-    'Laura;Gómez Pérez;laura@email.com;600111222;2 días por semana;Martes y Jueves 18:30;30/11/2026\n' +
-    'Carlos;Ruiz;carlos@email.com;600333444;3 días por semana;L-X-V 9:15;30/11/2026\n' +
-    'Ana;Martín;ana@email.com;600555666;3 días;L-M-J 20:30;15/12/2026\n';
+  const csv = '﻿nombre;apellidos;email;telefono;tarifa;horarios\n' +
+    'Laura;Gómez Pérez;laura@email.com;600111222;2 días por semana;Martes y Jueves 18:30\n' +
+    'Carlos;Ruiz;carlos@email.com;600333444;3 días por semana;L-X-V 9:15\n' +
+    'Ana;Martín;ana@email.com;600555666;3 días;L-M-J 20:30\n';
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = 'plantilla-clientes.csv';

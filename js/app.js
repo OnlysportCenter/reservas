@@ -307,7 +307,7 @@ function viewProfile() {
         ${isWeekly(u)
           ? `<div><div class="big">${weekLeft(u, new Date())}<span style="font-size:20px;opacity:.8"> / ${weekAllowance(u, new Date())}</span></div><div class="muted small">clases que te quedan esta semana</div></div>`
           : `<div><div class="big">${u.credits === null ? '∞' : u.credits}</div><div class="muted small">${u.credits === null ? 'clases ilimitadas' : 'clases disponibles'}</div></div>`}
-        <div style="text-align:right"><div class="muted small">${ps.ok ? 'Válido hasta' : 'Estado'}</div><div style="font-weight:700">${u.planExpires ? fmtDateShort(u.planExpires) : '—'}</div></div>
+        <div style="text-align:right"><div class="muted small">Cuota de ${monthName()}</div><div style="font-weight:700">${u.paymentDue ? 'Pendiente' : 'Al día'}</div></div>
       </div>
       ${isWeekly(u) ? (() => { const nx = addDays(weekStart(new Date()), 7); return `<div class="small" style="margin-top:12px;opacity:.9">Semana que viene: ${weekLeft(u, nx)} de ${weekAllowance(u, nx)} disponibles${weekExtra(u, nx) > 0 ? ` (incluye ${weekExtra(u, nx)} extra)` : ''}.<br>Las clases que no uses no pasan a la semana siguiente.</div>`; })() : ''}
       ${!ps.ok ? `<div style="margin-top:12px;background:rgba(0,0,0,.18);padding:8px 10px;border-radius:10px" class="small">${esc(ps.msg)}</div>` : ''}
@@ -351,7 +351,7 @@ function viewAdminToday() {
   const cap = ss.reduce((a, s) => a + s.capacity, 0);
   const active = clients().filter(c => c.active);
   const soon = addDays(startOfDay(new Date()), 7);
-  const expiring = active.filter(c => c.planExpires && parseKey(c.planExpires) <= soon && parseKey(c.planExpires) >= startOfDay(new Date()));
+  const dueCount = active.filter(c => c.paymentDue).length;
   const noPlan = active.filter(c => !planStatus(c).ok);
   return `
     <div class="page-title"><h1>Hoy · ${fmtDateLong(today)}</h1></div>
@@ -359,7 +359,7 @@ function viewAdminToday() {
       <div class="card stat"><div class="v">${active.length}</div><div class="l">Clientes activos</div></div>
       <div class="card stat"><div class="v">${booked}</div><div class="l">Reservas hoy</div></div>
       <div class="card stat"><div class="v">${cap ? Math.round(booked / cap * 100) : 0}%</div><div class="l">Ocupación hoy</div></div>
-      <div class="card stat"><div class="v">${expiring.length}</div><div class="l">Cuotas caducan en 7 días</div></div>
+      <div class="card stat"><div class="v">${dueCount}</div><div class="l">Cuotas pendientes de ${monthName()}</div></div>
     </div>
     <div class="section-h">Clases de hoy</div>
     <div class="stack">${ss.length ? ss.map(adminSessionCard).join('') : '<div class="card empty">Hoy no hay clases.</div>'}</div>
@@ -367,8 +367,8 @@ function viewAdminToday() {
     ${(db.prospects || []).length ? `<div class="card row between wrap" style="margin-top:14px">
       <div><b>📝 ${db.prospects.length} ${db.prospects.length === 1 ? 'persona espera' : 'personas esperan'} plaza</b><div class="muted small">Lista de espera de clientes nuevos</div></div>
       <button class="btn sm" data-a="prospects-open">Ver lista</button></div>` : ''}
-    ${expiring.length || noPlan.length ? `<div class="section-h">Requieren atención</div><div class="card list">
-      ${[...expiring.map(c => [c, `Bono caduca el ${fmtDateShort(c.planExpires)}`, 'warn']), ...noPlan.map(c => [c, shortStatus(c), 'danger'])]
+    ${noPlan.length ? `<div class="section-h">Requieren atención</div><div class="card list">
+      ${noPlan.map(c => [c, shortStatus(c), 'danger'])
         .map(([c, txt, t]) => `<div class="list-item clickable" data-a="client-open" data-id="${c.id}"><div class="avatar">${initials(c.name)}</div><div class="grow">${esc(c.name)}</div><span class="pill ${t}">${esc(txt)}</span></div>`).join('')}
     </div>` : ''}`;
 }
@@ -378,7 +378,6 @@ function shortStatus(c) {
   if (ps.ok) return 'Activo';
   if (c.blocked) return 'Bloqueado';
   if (!c.planId) return 'Sin bono';
-  if (c.planExpires && parseKey(c.planExpires) < startOfDay(new Date())) return 'Bono caducado';
   return 'Sin clases';
 }
 
@@ -692,7 +691,7 @@ function openClient(id) {
       <button class="btn sm ghost" data-a="admin-unbook" data-id="${b.id}" title="Quitar">${icon('x', 'width="16" height="16"')}</button></div>`).join('') : '<div class="empty">Sin clases próximas.</div>'}</div>
     <div class="card" style="margin-bottom:12px">
       <div class="row between"><div><div class="muted small">Tarifa actual</div><b>${p ? esc(p.name) : 'Sin tarifa'}</b></div>
-        <div style="text-align:right"><span class="pill ${ps.ok ? 'ok' : 'danger'}">${ps.ok ? 'Activa' : 'Inactiva'}</span><div class="muted small">Caduca ${c.planExpires ? fmtDateShort(c.planExpires) : '—'}</div></div></div>
+        <div style="text-align:right"><span class="pill ${ps.ok ? 'ok' : 'danger'}">${ps.ok ? 'Activa' : 'Inactiva'}</span><div class="muted small">Cuota de ${monthName()}: ${c.paymentDue ? '💶 pendiente' : '✅ al día'}</div></div></div>
       ${isWeekly(c) ? [0, 7].map(off => {
         const d = addDays(weekStart(new Date()), off), used = weekCount(c.id, d), all = weekAllowance(c, d), ex = weekExtra(c, d);
         return `<div class="week-row">
@@ -918,7 +917,7 @@ function viewAdminSettings() {
     <p class="muted small" style="margin-top:-8px">${window.SERVER ? 'Los correos se envían desde tu Gmail en menos de un minuto. Aquí ves los de los últimos 30 días.' : 'En el prototipo los correos no salen de verdad: se guardan aquí para que veas qué recibiría cada cliente.'}</p>
     <div class="page-title" style="margin-top:26px"><h1 style="font-size:18px">Tarifas</h1><button class="btn primary sm" data-a="plan-edit">${icon('plus', 'width="16" height="16"')}Nueva tarifa</button></div>
     <div class="card list">${db.plans.map(p => `<div class="list-item clickable" data-a="plan-edit" data-id="${p.id}">
-      <div class="grow"><b>${esc(p.name)}</b><div class="muted small">${planDesc(p)} · cuota de ${p.durationDays} días</div></div>
+      <div class="grow"><b>${esc(p.name)}</b><div class="muted small">${planDesc(p)} · cuota mensual</div></div>
       <b>${p.price} €</b></div>`).join('')}</div>
     ${window.SERVER ? '' : `<div class="section-h">Prototipo</div>
     <div class="card row between wrap"><span class="muted small">Borra todos los cambios y vuelve a los datos de ejemplo.</span><button class="btn danger" data-a="reset">Restablecer datos</button></div>`}`;
@@ -947,7 +946,7 @@ function openPlanForm(id) {
       </div>
       <div class="fields-2">
         <div class="field ${w ? 'hidden' : ''}" id="pt-credits"><label>Nº de clases</label><input name="credits" type="number" min="1" value="${p.credits ?? 8}"></div>
-        <div class="field"><label>Validez (días)</label><input name="durationDays" type="number" min="1" required value="${p.durationDays}"></div>
+        <input type="hidden" name="durationDays" value="${p.durationDays || 30}">
         <div class="field"><label>Precio (€)</label><input name="price" type="number" min="0" step="0.5" required value="${p.price}"></div>
       </div>
       <div class="modal-actions">${id ? `<button type="button" class="btn danger" data-a="plan-del" data-id="${id}" style="margin-right:auto">Eliminar</button>` : ''}
@@ -1053,11 +1052,11 @@ const actions = {
   'sel-none': () => { state.sel.clear(); render(); },
   'bulk-plan': () => {
     const pid = $('#bulk-plan').value, p = getPlan(pid);
-    confirmModal('Asignar tarifa', `Se asignará <b>${esc(p.name)}</b> a <b>${state.sel.size}</b> cliente(s), con caducidad dentro de ${p.durationDays} días. No se les envía ningún aviso.`, `data-a="bulk-plan-ok" data-p="${pid}"`, 'Asignar', false);
+    confirmModal('Asignar tarifa', `Se asignará <b>${esc(p.name)}</b> a <b>${state.sel.size}</b> cliente(s). No se les envía ningún aviso.`, `data-a="bulk-plan-ok" data-p="${pid}"`, 'Asignar', false);
   },
   'bulk-plan-ok': d => {
     const p = getPlan(d.p);
-    state.sel.forEach(id => { const u = getUser(id); u.planId = p.id; u.credits = p.type === 'weekly' ? null : p.credits; u.planExpires = dateKey(addDays(new Date(), p.durationDays)); syncGroups(id); });
+    state.sel.forEach(id => { const u = getUser(id); u.planId = p.id; u.credits = p.type === 'weekly' ? null : p.credits; u.planExpires = null; syncGroups(id); });
     saveDB(); toast(`Tarifa asignada a ${state.sel.size} cliente(s)`, 'ok'); state.sel.clear(); closeModal(); render();
   },
   'bulk-block': () => confirmModal('Bloquear clientes', `Se bloquearán ${state.sel.size} cliente(s) por cuota pendiente. No podrán reservar.`, 'data-a="bulk-block-ok"', 'Bloquear'),
