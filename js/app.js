@@ -136,6 +136,7 @@ function renderLogin() {
       <div class="stack demo-list">${demo.map(u => `<button class="btn block" data-a="login-as" data-id="${u.id}" style="justify-content:flex-start">
         <span class="avatar" style="width:28px;height:28px;font-size:11px">${initials(u.name)}</span>${esc(u.name)} <span class="muted small" style="margin-left:auto">${u.role === 'admin' ? 'Administrador' : 'Cliente'}</span></button>`).join('')}</div>
       <p class="muted small" style="margin-top:14px">⚠️ Prototipo: aún sin contraseñas. En la versión real cada cliente tendrá su acceso seguro.</p>
+      <p class="muted small" style="margin:10px 0 0">Usamos tus datos solo para gestionar tus clases. <button class="legal-link" data-a="privacy">Privacidad</button></p>
     </div></div>`;
 }
 
@@ -240,6 +241,11 @@ function viewClientBook() {
         else if (started) act = '<span class="pill">Finalizada</span>';
         else if (ps.blocked) act = '<span class="pill">Bloqueado</span>';
         else if (full) act = db.settings.waitlistEnabled ? `<button class="btn sm" data-a="book" data-id="${s.id}">Apuntarme a la lista de espera</button>` : '';
+        else if (ps.ok && !canUseFor(u, s).ok) {
+          // ya tiene sus clases (semana completa u otra clase ese día): puede esperar aquí sin gastar clase
+          act = db.settings.waitlistEnabled ? `<button class="btn sm" data-a="book" data-id="${s.id}">Apuntarme en espera</button>` : '';
+          extra = `<div class="muted small" style="margin-top:4px">Ya tienes tus clases ${/ese día/.test(canUseFor(u, s).msg) ? 'de ese día' : 'de esta semana'}. Si te apuntas, entrarás cuando te quites de otra.</div>`;
+        }
         else act = `<button class="btn sm primary" data-a="book" data-id="${s.id}">Reservar</button>`;
         return `<div class="card session ${s.cancelled ? 'cancelled' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
@@ -330,13 +336,52 @@ function viewProfile() {
       · Si una clase está llena, apúntate a la lista de espera: entrarás automáticamente si alguien cancela.<br>
       · Te enviaremos un recordatorio ${db.settings.reminderHours} h antes de la clase.
     </div>
-    <button class="btn block" style="margin-top:16px" data-a="logout">${icon('out', 'width="18" height="18"')}Cerrar sesión</button>`;
+    <button class="btn block" style="margin-top:16px" data-a="logout">${icon('out', 'width="18" height="18"')}Cerrar sesión</button>
+    <p style="text-align:center;margin-top:14px"><button class="legal-link" data-a="privacy">Privacidad y tus datos</button></p>`;
 }
+
+// ---------- Información de privacidad (RGPD) ----------
+const LEGAL_DEFAULT = { nif: '', address: 'Calle Alonso de Aguilar, 16, 14920 Aguilar de la Frontera (Córdoba)', email: 'onlysport.app@gmail.com', phone: '604 490 693' };
+const legal = () => ({ ...LEGAL_DEFAULT, ...((db && db.settings && db.settings.legal) || {}) });
+function privacyHTML() {
+  const L = legal(), name = esc(db?.settings?.centerName || 'Onlysport Center');
+  const contact = L.email ? `escribiendo a <b>${esc(L.email)}</b>` : 'contactando con el centro';
+  return `<div class="legal">
+    <p>Esta app sirve para gestionar tus clases en ${name}. Aquí te contamos, de forma clara, qué datos usamos y para qué.</p>
+    <h3>Responsable</h3>
+    <p>${name}${L.nif ? ` · NIF ${esc(L.nif)}` : ''}${L.address ? ` · ${esc(L.address)}` : ''}${L.phone ? ` · Tel. ${esc(L.phone)}` : ''}${L.email ? ` · ${esc(L.email)}` : ''}.</p>
+    <h3>Qué datos tratamos</h3>
+    <p>Los que nos diste al apuntarte (nombre, apellidos, email y teléfono), tu tarifa, tus grupos y reservas, tu asistencia, las listas de espera en las que estás, tus respuestas sobre la cuota del mes y los avisos que te enviamos.</p>
+    <h3>Para qué</h3>
+    <p>Para reservar tus clases, gestionar las listas de espera, avisarte de cambios (por la app o por correo) y llevar tu relación como socio del centro. No hacemos perfiles ni usamos tus datos para publicidad.</p>
+    <h3>Base legal</h3>
+    <p>La relación que tienes con el centro como socio (artículo 6.1.b del Reglamento General de Protección de Datos).</p>
+    <h3>Quién más los ve</h3>
+    <p>Solo el centro. Los demás socios no ven tu nombre ni tus reservas: solo cuántas plazas quedan libres. No cedemos tus datos a nadie.</p>
+    <p>Para que la app funcione usamos estos proveedores, que tratan los datos por cuenta del centro:</p>
+    <ul><li><b>Supabase</b>: base de datos y acceso con código. Servidores en Fráncfort (Unión Europea).</li>
+      <li><b>GitHub Pages</b> (GitHub Inc.): aloja la app y registra la dirección IP de las visitas por seguridad. Adherido al Marco de Privacidad de Datos UE-EE. UU.</li>
+      <li><b>Google (Gmail)</b>: envía los códigos de acceso y los avisos por correo.</li></ul>
+    <h3>Cuánto tiempo</h3>
+    <p>Mientras seas socio. Si te das de baja, borramos tus datos de la app, salvo lo que la ley nos obligue a guardar.</p>
+    <h3>Tu sesión en el móvil</h3>
+    <p>La app guarda tu sesión en el navegador para no pedirte el código cada vez. No usa cookies de publicidad ni de analítica.</p>
+    <h3>Personas en lista de espera para apuntarse</h3>
+    <p>Si nos dejas tu nombre y tu teléfono o email porque esperas una plaza, solo los usamos para avisarte cuando haya hueco, y los borramos si ya no te interesa.</p>
+    <h3>Tus derechos</h3>
+    <p>Puedes pedir ver, corregir o borrar tus datos, oponerte a su uso o pedir una copia ${contact}. Si crees que no los tratamos bien, puedes reclamar ante la Agencia Española de Protección de Datos (<b>aepd.es</b>).</p>
+  </div>`;
+}
+function openPrivacy() { openModal(`${modalHead('Privacidad')}${privacyHTML()}<div class="modal-actions"><button class="btn primary" data-a="close">Entendido</button></div>`); }
 
 function openNotifications() {
   const list = notificationsFor(state.userId);
+  const read = list.filter(n => n.read).length;
   openModal(`${modalHead('Notificaciones')}
-    <div class="card list">${list.length ? list.slice(0, 40).map(n => `<div class="notif ${n.read ? '' : 'unread'}"><div class="grow">${esc(n.text)}<div class="muted small">${fmtAgo(n.date)}</div></div></div>`).join('')
+    ${read ? `<div class="row between wrap" style="margin:-6px 0 10px"><span class="muted small">${read} ${read === 1 ? 'leída' : 'leídas'}</span>
+      <button class="btn sm" data-a="notif-clear">🗑 Borrar las leídas</button></div>` : ''}
+    <div class="card list">${list.length ? list.slice(0, 40).map(n => `<div class="notif ${n.read ? '' : 'unread'}"><div class="grow">${esc(n.text)}<div class="muted small">${fmtAgo(n.date)}</div></div>
+      <button class="btn sm ghost" data-a="notif-del" data-id="${n.id}" title="Borrar" aria-label="Borrar">${icon('x', 'width="16" height="16"')}</button></div>`).join('')
       : '<div class="empty">No tienes notificaciones.</div>'}</div>`);
   list.forEach(n => n.read = true);
   saveDB();
@@ -885,6 +930,17 @@ function viewAdminSettings() {
   return `
     <div class="page-title"><h1>Ajustes</h1></div>
     ${brandSettingsHTML()}
+    <div class="page-title" style="margin-top:26px"><h1 style="font-size:18px">Datos legales</h1><button class="btn sm" data-a="privacy">Ver la privacidad</button></div>
+    <form class="card" data-form="legal">
+      <p class="muted small" style="margin-top:0">Aparecen en la información de privacidad que ven los socios.</p>
+      <div class="fields-2">
+        <div class="field"><label>NIF / CIF</label><input name="nif" value="${esc(legal().nif)}" placeholder="Opcional"></div>
+        <div class="field"><label>Email de contacto</label><input name="email" type="email" value="${esc(legal().email)}"></div>
+        <div class="field"><label>Teléfono</label><input name="phone" value="${esc(legal().phone)}"></div>
+        <div class="field"><label>Dirección</label><input name="address" value="${esc(legal().address)}"></div>
+      </div>
+      <button class="btn primary" type="submit">Guardar datos legales</button>
+    </form>
     <div class="page-title" style="margin-top:26px"><h1 style="font-size:18px">Normas de reserva</h1></div>
     <form class="card" data-form="settings">
       <div class="section-h" style="margin-top:0">Publicación de clases y horarios</div>
@@ -975,6 +1031,9 @@ const actions = {
   bg: (d, el, e) => { if (e.target === el) closeModal(); },
   notifs: () => { openNotifications(); render(); },
   'mine-tab': d => { state.mineTab = d.t; render(); },
+  privacy: () => openPrivacy(),
+  'notif-clear': async (d, el) => { el.disabled = true; await deleteReadNotifications(state.userId); openNotifications(); render(); toast('Notificaciones leídas borradas', 'ok'); },
+  'notif-del': async d => { await deleteNotification(d.id); openNotifications(); render(); },
   'pay-answer': async (d, el) => {
     el.disabled = true;
     const r = await answerPayment(state.userId, d.v);
@@ -1190,6 +1249,10 @@ const forms = {
     else if (form.dataset.prospect) { const nu = db.users.find(u => u.email === data.email && u.name === data.name); nu ? openClient(nu.id) : closeModal(); }
     else closeModal();
     render();
+  },
+  legal: f => {
+    db.settings.legal = { nif: f.get('nif').trim(), email: f.get('email').trim(), phone: f.get('phone').trim(), address: f.get('address').trim() };
+    saveDB(); toast('Datos legales guardados', 'ok'); render();
   },
   prospect: (f, form) => {
     saveProspect({ id: form.dataset.id || undefined, name: f.get('name').trim(), lastName: f.get('lastName').trim(), phone: f.get('phone').trim(), email: f.get('email').trim(), note: f.get('note').trim() });

@@ -204,6 +204,19 @@
     await reload();
     return error ? { ok: false, msg: error.message } : data;
   };
+  // Borrar notificaciones: el cliente solo puede borrar las suyas (lo comprueba el servidor)
+  window.deleteReadNotifications = async function () {
+    if (role === 'admin') { window.saveDB(); return; }
+    await sb.rpc('mark_notifications_read');
+    const { error } = await sb.rpc('delete_read_notifications');
+    if (error) toast(error.message, 'err');
+    await reload();
+  };
+  window.deleteNotification = async function (id) {
+    const { error } = await sb.rpc('delete_notification', { nid: id });
+    if (error) toast(error.message, 'err');
+    await reload();
+  };
   const _openNotifications = window.openNotifications;
   window.openNotifications = function () {
     _openNotifications();
@@ -266,6 +279,7 @@
             <button class="btn ghost sm" data-a="login-back">← Cambiar email</button>
             <button class="btn ghost sm" data-a="login-resend">Reenviar código</button>
           </div>`}
+        <p class="muted small" style="margin:16px 0 0;border-top:1px solid var(--border);padding-top:12px">Usamos tus datos solo para gestionar tus clases. <button class="legal-link" data-a="privacy">Privacidad</button></p>
       </div></div>`;
   };
 

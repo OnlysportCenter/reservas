@@ -403,6 +403,9 @@ function carryOverWeek(userId, d, { email = false, app = true } = {}) {
 function notify(userId, text, type = 'info') {
   db.notifications.push({ id: uid(), userId, text, type, date: new Date().toISOString(), read: false });
 }
+// El cliente borra sus notificaciones (con servidor lo sustituye remote.js)
+function deleteReadNotifications(userId) { db.notifications = db.notifications.filter(n => !(n.userId === userId && n.read)); saveDB(); }
+function deleteNotification(id) { db.notifications = db.notifications.filter(n => n.id !== id); saveDB(); }
 function notificationsFor(userId) {
   return db.notifications.filter(n => n.userId === userId).sort((a, b) => b.date.localeCompare(a.date));
 }
@@ -444,14 +447,17 @@ function book(userId, sessionId) {
   if (!isVisibleToClients(s)) return { ok: false, msg: 'Esta clase todavía no está disponible.' };
   if (sessionStart(s) <= new Date()) return { ok: false, msg: 'Esta clase ya ha empezado.' };
   const cu = canUseFor(u, s);
-  if (!cu.ok) return cu;
-  if (freeSpots(s) <= 0) {
-    if (!db.settings.waitlistEnabled) return { ok: false, msg: 'La clase está completa.' };
+  // Lista de espera: clase completa, o el cliente ya tiene sus clases (semana completa / clase ese día).
+  // En el segundo caso no gasta clase ni entra hasta que se quite de una de las suyas.
+  if (freeSpots(s) <= 0 || !cu.ok) {
+    if (!db.settings.waitlistEnabled) return cu.ok ? { ok: false, msg: 'La clase está completa.' } : cu;
     if (waitlistOf(s.id).length >= db.settings.waitlistMax) return { ok: false, msg: 'La lista de espera está completa.' };
     const b = { id: uid(), sessionId, userId, status: 'waitlist', createdAt: new Date().toISOString(), reminded: false };
     db.bookings.push(b);
     saveDB();
-    return { ok: true, waitlist: true, msg: `Clase completa: estás el nº ${waitlistPosition(b)} en la lista de espera. Si se libera una plaza entrarás automáticamente y te avisaremos.` };
+    return { ok: true, waitlist: true, msg: !cu.ok
+      ? `Te hemos apuntado a la lista de espera (vas el nº ${waitlistPosition(b)}). Como ya tienes tus clases, entrarás en cuanto te quites de otra ${/ese día/.test(cu.msg) ? 'de ese día' : 'de esa semana'}.`
+      : `Clase completa: estás el nº ${waitlistPosition(b)} en la lista de espera. Si se libera una plaza entrarás automáticamente y te avisaremos.` };
   }
   spendCredit(u);
   db.bookings.push({ id: uid(), sessionId, userId, status: 'booked', createdAt: new Date().toISOString(), reminded: false });
@@ -540,7 +546,7 @@ function promoteWaitlist(sessionId) {
       b.status = 'booked';
       const removed = cleanupWaitlists(u, s);
       const extra = removed.length ? `\n\nComo ya no te quedan clases libres para ello, te hemos quitado de la lista de espera de:\n${removed.map(classLabel).join('\n')}` : '';
-      notify(u.id, `🎉 ¡Se ha liberado una plaza! Ya tienes reserva en ${classLabel(s)}.`, 'success');
+      notify(u.id, `🎉 ¡Ya tienes plaza! Has pasado de la lista de espera a ${classLabel(s)}.`, 'success');
       if (db.settings.emailOnPromote) sendEmail(u.id, '¡Has entrado en la clase!', `Hola ${u.name.split(' ')[0]},\n\nSe ha liberado una plaza y has pasado de la lista de espera a la clase:\n${classLabel(s)}${extra}\n\nSi no puedes asistir, quítate desde la app.\n\n${db.settings.centerName}`);
     }
   }
