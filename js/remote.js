@@ -217,6 +217,21 @@
     if (error) toast(error.message, 'err');
     await reload();
   };
+  // Bandeja de correos: antes de abrirla se trae el estado real (enviado / pendiente / error)
+  const _openEmails = window.openEmails;
+  window.openEmails = async function () {
+    if (role === 'admin') {
+      try {
+        await enqueue(async () => {
+          await flushNow();
+          const rows = await fetchAll(() => sb.from('emails').select('*').gte('date', addDays(new Date(), -30).toISOString()).order('id'));
+          db.emails = rows.map(r => toJS('emails', r));
+          snapshot.emails = new Map(db.emails.map(o => [o.id, JSON.stringify(toDB('emails', o))]));
+        });
+      } catch (e) { console.error(e); }
+    }
+    _openEmails();
+  };
   const _openNotifications = window.openNotifications;
   window.openNotifications = function () {
     _openNotifications();

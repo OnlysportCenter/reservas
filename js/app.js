@@ -100,6 +100,7 @@ function render() {
   if (!u.active) { toast('Tu cuenta está desactivada. Habla con el centro.', 'err'); return logout(); }
   if (u.role === 'client') generateReminders(u.id);
   const unread = notificationsFor(u.id).filter(n => !n.read).length;
+  if (u.role === 'client') announceNewNotifications(u.id, unread);
   const nav = u.role === 'admin'
     ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
     : [['c-book', 'cal', 'Reservar'], ['c-mine', 'check', 'Mis clases'], ['c-board', 'board', 'Tablón'], ['c-profile', 'user', 'Perfil']];
@@ -112,7 +113,7 @@ function render() {
     <div class="shell ${u.role}">
       <header class="topbar">
         <div class="brand">${brandMark(34)}${brandName()} ${u.role === 'admin' ? '<span class="role-tag">ADMIN</span>' : ''}</div>
-        ${u.role === 'client' ? `<button class="icon-btn" data-a="notifs" aria-label="Notificaciones">${icon('bell')}${unread ? `<span class="badge">${unread}</span>` : ''}</button>` : ''}
+        ${u.role === 'client' ? `<button class="icon-btn bell-btn ${unread ? 'has-unread' : ''}" data-a="notifs" aria-label="${unread ? `${unread} notificaciones sin leer` : 'Notificaciones'}">${icon('bell')}${unread ? `<span class="badge">${unread > 9 ? '9+' : unread}</span>` : ''}</button>` : ''}
         <button class="icon-btn" data-a="logout" aria-label="Salir" title="Cerrar sesión">${icon('out')}</button>
       </header>
       <main class="content">${(views[state.view] || views[nav[0][0]])()}</main>
@@ -338,6 +339,35 @@ function viewProfile() {
     </div>
     <button class="btn block" style="margin-top:16px" data-a="logout">${icon('out', 'width="18" height="18"')}Cerrar sesión</button>
     <p style="text-align:center;margin-top:14px"><button class="legal-link" data-a="privacy">Privacidad y tus datos</button></p>`;
+}
+
+// ---------- Aviso al llegar una notificación nueva ----------
+// La primera vez (al entrar) solo se apunta lo que hay; después, cada aviso nuevo sale arriba, vibra
+// el móvil y se pone el número en el icono de la app instalada.
+let seenNotifs = null;
+function announceNewNotifications(userId, unread) {
+  const unreadList = notificationsFor(userId).filter(n => !n.read);
+  if (seenNotifs === null || seenNotifs.user !== userId) { seenNotifs = { user: userId, ids: new Set(unreadList.map(n => n.id)) }; }
+  else {
+    const fresh = unreadList.filter(n => !seenNotifs.ids.has(n.id));
+    fresh.forEach(n => seenNotifs.ids.add(n.id));
+    if (fresh.length) {
+      showNotifBanner(fresh[0].text, fresh.length);
+      try { navigator.vibrate?.([120, 60, 120]); } catch (e) {}
+    }
+  }
+  try { if ('setAppBadge' in navigator) unread ? navigator.setAppBadge(unread) : navigator.clearAppBadge(); } catch (e) {}
+  document.title = (unread ? `(${unread}) ` : '') + (db.settings.centerName || 'Onlysport Center');
+}
+function showNotifBanner(text, n) {
+  document.querySelector('.notif-banner')?.remove();
+  const el = document.createElement('button');
+  el.className = 'notif-banner';
+  el.dataset.a = 'notifs';
+  el.innerHTML = `<span class="nb-icon">${icon('bell')}</span><span class="nb-text"><b>${n > 1 ? `${n} avisos nuevos` : 'Aviso nuevo'}</b><span>${esc(text)}</span></span>`;
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add('out'), 7000);
+  setTimeout(() => el.remove(), 7600);
 }
 
 // ---------- Información de privacidad (RGPD) ----------
@@ -988,12 +1018,19 @@ function viewAdminSettings() {
     <div class="card row between wrap"><span class="muted small">Borra todos los cambios y vuelve a los datos de ejemplo.</span><button class="btn danger" data-a="reset">Restablecer datos</button></div>`}`;
 }
 
+// En modo prueba todos cuentan como «enviados» (no salen de verdad)
+const emailSent = e => !window.SERVER || !!e.sentAt;
 function openEmails() {
   const list = [...db.emails].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60);
+  const sent = db.emails.filter(emailSent).length, pending = db.emails.length - sent;
   openModal(`${modalHead(window.SERVER ? 'Correos enviados' : 'Correos enviados (simulados)')}
+    ${db.emails.length ? `<div class="row between wrap" style="margin:-6px 0 10px">
+      <span class="muted small">${sent} ${sent === 1 ? 'enviado' : 'enviados'}${window.SERVER && pending ? ` · ${pending} pendiente(s) o con error` : ''}</span>
+      ${sent ? `<button class="btn sm" data-a="emails-clear">🗑 Borrar los enviados (${sent})</button>` : ''}</div>` : ''}
     <div class="stack">${list.length ? list.map(e => `<div class="card email">
-      <div class="row between"><b>${esc(e.subject)}</b><span class="muted small">${fmtAgo(e.date)}</span></div>
-      <div class="muted small">Para: ${esc(e.to)}${window.SERVER ? (e.sentAt ? ' · ✅ enviado' : e.error ? ` · ❌ error: ${esc(e.error)}` : ' · ⏳ pendiente') : ''}</div><pre>${esc(e.body)}</pre></div>`).join('') : '<div class="empty">Aún no se ha enviado ningún correo.</div>'}</div>`);
+      <div class="row between" style="gap:8px"><b>${esc(e.subject)}</b><span class="row" style="gap:4px"><span class="muted small">${fmtAgo(e.date)}</span>
+        <button class="btn sm ghost" data-a="email-del" data-id="${e.id}" title="${emailSent(e) ? 'Borrar' : 'Borrar (no se enviará)'}" aria-label="Borrar">${icon('x', 'width="16" height="16"')}</button></span></div>
+      <div class="muted small">Para: ${esc(e.to)}${window.SERVER ? (e.sentAt ? ' · ✅ enviado' : e.error ? ` · ❌ error: ${esc(e.error)}` : ' · ⏳ pendiente') : ''}</div><pre>${esc(e.body)}</pre></div>`).join('') : '<div class="empty">No hay correos en la bandeja.</div>'}</div>`);
 }
 
 function openPlanForm(id) {
@@ -1029,7 +1066,7 @@ const actions = {
   day: d => { state.date = d.k; render(); },
   close: () => closeModal(),
   bg: (d, el, e) => { if (e.target === el) closeModal(); },
-  notifs: () => { openNotifications(); render(); },
+  notifs: () => { document.querySelector('.notif-banner')?.remove(); openNotifications(); render(); },
   'mine-tab': d => { state.mineTab = d.t; render(); },
   privacy: () => openPrivacy(),
   'notif-clear': async (d, el) => { el.disabled = true; await deleteReadNotifications(state.userId); openNotifications(); render(); toast('Notificaciones leídas borradas', 'ok'); },
@@ -1088,6 +1125,12 @@ const actions = {
     saveDB(); toast('Límite semanal guardado', 'ok'); openClient(d.id); render();
   },
   emails: () => openEmails(),
+  'emails-clear': () => {
+    const n = db.emails.filter(emailSent).length;
+    db.emails = db.emails.filter(e => !emailSent(e)); saveDB();
+    toast(`${n} correo(s) borrados de la bandeja`, 'ok'); openEmails(); render();
+  },
+  'email-del': d => { db.emails = db.emails.filter(e => e.id !== d.id); saveDB(); openEmails(); render(); },
   'client-filter': d => { state.clientFilter = d.f; render(); },
   'clients-tab': d => { state.clientsTab = d.t; state.search = ''; state.selectMode = false; render(); },
   'prospects-open': () => { state.view = 'a-clients'; state.clientsTab = 'prospects'; render(); window.scrollTo(0, 0); },
