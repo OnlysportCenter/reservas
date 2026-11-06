@@ -163,7 +163,9 @@ function capBar(s) {
 // ============================================================
 // Días que el cliente puede ver según la configuración de publicación
 function clientDaysAhead() {
-  return Math.max(0, Math.round((visibleUntil() - startOfDay(new Date())) / 86400000) - 1);
+  const general = Math.round((visibleUntil() - startOfDay(new Date())) / 86400000) - 1;
+  const own = db.schedule.map(t => (t.visibleDays === null || t.visibleDays === undefined || t.visibleDays === '') ? 0 : Number(t.visibleDays));
+  return Math.max(0, general, ...own);
 }
 // Lo único que ve el cliente: plazas libres (nunca nombres de otros clientes)
 function spotsInfo(s) {
@@ -238,7 +240,7 @@ function viewClientBook() {
         else if (ps.blocked) act = '<span class="pill">Bloqueado</span>';
         else if (full) act = db.settings.waitlistEnabled ? `<button class="btn sm" data-a="book" data-id="${s.id}">Apuntarme a la lista de espera</button>` : '';
         else act = `<button class="btn sm primary" data-a="book" data-id="${s.id}">Reservar</button>`;
-        return `<div class="card session ${s.cancelled ? 'cancelled' : ''}" style="--c:${ct.color}">
+        return `<div class="card session ${s.cancelled ? 'cancelled' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
           <div class="info"><div class="name">${esc(ct.name)}</div>${s.cancelled ? '' : spotsInfo(s)}${extra}</div>
           <div class="act">${act}</div></div>`;
@@ -263,7 +265,7 @@ function viewClientMine() {
       ${items.length ? items.map(({ b, s }) => {
         const ct = getClassType(s.classTypeId);
         const canCancel = state.mineTab === 'next' && sessionStart(s) > now;
-        return `<div class="card session" style="--c:${ct.color}">
+        return `<div class="card session" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${fmtDateShort(s.date)}</div></div>
           <div class="info"><div class="name">${esc(ct.name)}</div><div class="meta">${s.duration} min</div>
             ${canCancel && b.status === 'booked' && isLateCancel(s) ? `<div class="small" style="color:var(--warn);margin-top:4px">Fuera de plazo de cancelación gratuita</div>` : ''}</div>
@@ -311,7 +313,7 @@ function viewProfile() {
       ${!ps.ok ? `<div style="margin-top:12px;background:rgba(0,0,0,.18);padding:8px 10px;border-radius:10px" class="small">${esc(ps.msg)}</div>` : ''}
     </div>
     ${groupsOf(u.id).length ? `<div class="section-h">Mis grupos fijos</div>
-    <div class="card list" style="margin-bottom:12px">${groupsOf(u.id).map(t => `<div class="list-item"><span class="swatch" style="--c:${getClassType(t.classTypeId).color}"></span><div class="grow">${esc(slotLabel(t))}</div></div>`).join('')}</div>` : ''}
+    <div class="card list" style="margin-bottom:12px">${groupsOf(u.id).map(t => `<div class="list-item"><span class="swatch" style="--c:${slotColor(t)}"></span><div class="grow">${esc(slotLabel(t))}</div></div>`).join('')}</div>` : ''}
     <div class="grid-stats" style="grid-template-columns:1fr 1fr">
       <div class="card stat"><div class="v">${monthCount}</div><div class="l">Clases este mes</div></div>
       <div class="card stat"><div class="v">${total}</div><div class="l">Asistencias totales</div></div>
@@ -383,7 +385,7 @@ function shortStatus(c) {
 function adminSessionCard(s) {
   const ct = getClassType(s.classTypeId);
   const published = sessionStart(s) < visibleUntil();
-  return `<div class="card session clickable ${s.cancelled ? 'cancelled' : ''} ${isHidden(s) ? 'is-hidden' : ''}" style="--c:${ct.color}" data-a="session-open" data-id="${s.id}">
+  return `<div class="card session clickable ${s.cancelled ? 'cancelled' : ''} ${isHidden(s) ? 'is-hidden' : ''}" style="--c:${sessionColor(s)}" data-a="session-open" data-id="${s.id}">
     <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
     <div class="info"><div class="name">${esc(ct.name)}</div><div class="meta">${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div>${capBar(s)}</div>
     <div class="act">${s.cancelled ? '<span class="pill danger">Cancelada</span>' : ''}${isHidden(s) ? '<span class="pill">🙈 Oculta</span>' : ''}
@@ -461,7 +463,7 @@ function openMultiAdd(userId) {
     <form data-form="multiadd" data-id="${userId}">
       <div class="multi-list">${Object.keys(byDay).map(k => `<div class="multi-day">${fmtDateLong(k)}</div>
         ${byDay[k].map(s => { const ct = getClassType(s.classTypeId), f = freeSpots(s); return `<label class="multi-item"><input type="checkbox" name="sid" value="${s.id}">
-          <span class="swatch" style="--c:${ct.color}"></span><b>${s.time}</b> ${esc(ct.name)} <span class="muted small" style="margin-left:auto">${f > 0 ? f + ' libres' : 'completa'}${isHidden(s) ? ' · oculta' : ''}</span></label>`; }).join('')}`).join('') || '<div class="empty">No hay clases próximas.</div>'}</div>
+          <span class="swatch" style="--c:${sessionColor(s)}"></span><b>${s.time}</b> ${esc(ct.name)} <span class="muted small" style="margin-left:auto">${f > 0 ? f + ' libres' : 'completa'}${isHidden(s) ? ' · oculta' : ''}</span></label>`; }).join('')}`).join('') || '<div class="empty">No hay clases próximas.</div>'}</div>
       <div class="field" style="margin-top:12px"><label>Cómo apuntarlo</label>
         <select name="mode"><option value="auto">En la clase (si está completa → lista de espera)</option>
           <option value="force">En la clase aunque esté completa (supera el aforo)</option>
@@ -480,7 +482,32 @@ function openSlot(slotId) {
   const others = clients().filter(c => c.active && !t.members.includes(c.id)).sort((a, b) => a.name.localeCompare(b.name));
   const next = db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > new Date() && !s.cancelled).sort((a, b) => sessionStart(a) - sessionStart(b))[0];
   openModal(`${modalHead(`Grupo · ${esc(slotLabel(t))}`)}
-    <p class="muted" style="margin-top:-8px">${members.length} de ${ct.capacity} plazas ocupadas por el grupo fijo${members.length > ct.capacity ? ' · <b style="color:var(--danger)">supera el aforo</b>' : ''}.
+    <div class="card row wrap" style="margin:-4px 0 12px;gap:12px">
+      <div class="grow"><b>Plazas de este turno</b><div class="muted small">${t.capacity ? 'Propias de este turno' : `Las del tipo de clase (${ct.capacity})`}. Se aplican a todas sus próximas clases.</div></div>
+      <input type="number" min="1" max="200" id="slot-cap" class="search" style="margin:0;width:90px" value="${slotCapacity(t)}">
+      <button class="btn sm primary" data-a="slot-cap" data-id="${t.id}">Guardar</button>
+    </div>
+    <div class="card" style="margin:0 0 12px">
+      <b>Color del turno</b> <span class="muted small">· se ve en tu horario, el calendario y la app de los socios</span>
+      <div class="row wrap" style="margin-top:8px">${colorSwatches(slotColor(t), 'turn-color')}
+        <input type="color" id="turn-color-custom" value="${slotColor(t)}" style="width:44px;height:32px;padding:2px;border-radius:8px;border:1px solid var(--border)"></div>
+      <div class="row wrap" style="margin-top:8px">
+        <label class="check" style="margin:0"><input type="checkbox" id="turn-color-all" checked> Todos los días de las ${t.time} (${db.schedule.filter(x => x.time === t.time && x.classTypeId === t.classTypeId).map(x => DOW[x.weekday]).join(', ')})</label>
+        <button class="btn sm primary" style="margin-left:auto" data-a="turn-color-save" data-id="${t.id}">Guardar color</button>
+      </div>
+    </div>
+    <div class="card" style="margin:0 0 12px">
+      <b>Temporada y antelación</b> <span class="muted small">· ahora: ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · los socios lo ven ${t.visibleDays} días antes` : ''}</span>
+      <div class="fields-2" style="margin-top:8px">
+        <div class="field" style="margin:0"><label>Desde (mes)</label><input id="season-from" type="month" value="${t.startDate ? t.startDate.slice(0, 7) : ''}"></div>
+        <div class="field" style="margin:0"><label>Hasta (mes)</label><input id="season-to" type="month" value="${t.endDate ? t.endDate.slice(0, 7) : ''}"></div>
+      </div>
+      <div class="row wrap" style="margin-top:8px">
+        <div class="field grow" style="margin:0"><label>Días de antelación para los socios</label><input id="season-vis" type="number" min="0" max="120" placeholder="Lo general: ${db.settings.bookWindowDays}" value="${t.visibleDays ?? ''}"></div>
+        <button class="btn sm primary" style="align-self:flex-end" data-a="slot-season" data-id="${t.id}">Guardar</button>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:-4px">${members.length} de ${slotCapacity(t)} plazas ocupadas por el grupo fijo${members.length > slotCapacity(t) ? ' · <b style="color:var(--danger)">supera el aforo</b>' : ''}.
       Las plazas que queden libres las pueden reservar otros clientes.</p>
     <div class="card list">${members.length ? members.map(u => `<div class="list-item"><div class="avatar">${initials(u.name)}</div>
       <div class="grow"><div class="ellipsis">${esc(u.name)}</div><div class="muted small">${esc(getPlan(u.planId)?.name || 'Sin tarifa')} · ${groupsOf(u.id).length} grupo(s)${u.blocked ? ' · <b style="color:var(--danger)">bloqueado</b>' : ''}
@@ -650,16 +677,16 @@ function openClient(id) {
       ${!c.blocked ? `<button class="btn danger" data-a="client-block" data-id="${c.id}">🔒 Bloquear (impago)</button>` : ''}
     </div>
     <div class="section-h" style="margin-top:4px">Grupos fijos (${groupsOf(c.id).length}${isWeekly(c) ? ` · tarifa de ${getPlan(c.planId).perWeek} por semana` : ''})</div>
-    <div class="card list" style="margin-bottom:8px">${groupsOf(c.id).map(t => `<div class="list-item"><span class="swatch" style="--c:${getClassType(t.classTypeId).color}"></span>
+    <div class="card list" style="margin-bottom:8px">${groupsOf(c.id).map(t => `<div class="list-item"><span class="swatch" style="--c:${slotColor(t)}"></span>
       <div class="grow">${esc(slotLabel(t))}</div>
       <button class="btn sm ghost" data-a="group-remove" data-id="${t.id}" data-u="${c.id}" title="Quitar del grupo">${icon('x', 'width="16" height="16"')}</button></div>`).join('') || '<div class="empty" style="padding:16px">Sin grupo fijo.</div>'}</div>
     ${isWeekly(c) && groupsOf(c.id).length > getPlan(c.planId).perWeek ? `<p class="small" style="color:var(--warn)">⚠️ Tiene más grupos que clases por semana en su tarifa.</p>` : ''}
     <div class="row" style="margin-bottom:12px"><select class="search" style="margin:0" id="client-group-sel"><option value="">Añadir a un grupo…</option>
-      ${db.schedule.filter(t => !t.members.includes(c.id)).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7) || a.time.localeCompare(b.time)).map(t => `<option value="${t.id}">${esc(slotLabel(t))} (${t.members.length}/${getClassType(t.classTypeId).capacity})</option>`).join('')}</select>
+      ${db.schedule.filter(t => !t.members.includes(c.id)).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7) || a.time.localeCompare(b.time)).map(t => `<option value="${t.id}">${esc(slotLabel(t))} (${t.members.length}/${slotCapacity(t)})</option>`).join('')}</select>
       <button class="btn" data-a="client-group-add" data-id="${c.id}">Añadir</button></div>
     <div class="row wrap small" style="margin:-4px 0 8px">${notifyChecks()}</div>
     <div class="section-h" style="margin-top:4px">Próximas clases (${next.length})</div>
-    <div class="card list" style="margin-bottom:12px">${next.length ? next.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${getClassType(s.classTypeId).color}"></span>
+    <div class="card list" style="margin-bottom:12px">${next.length ? next.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
       <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
       <span class="pill ${b.status === 'waitlist' ? 'warn' : 'ok'}">${b.status === 'waitlist' ? 'Espera nº ' + waitlistPosition(b) : 'Reservada'}</span>
       <button class="btn sm ghost" data-a="admin-unbook" data-id="${b.id}" title="Quitar">${icon('x', 'width="16" height="16"')}</button></div>`).join('') : '<div class="empty">Sin clases próximas.</div>'}</div>
@@ -696,7 +723,7 @@ function openClient(id) {
       <div class="card stat"><div class="v">${attended}</div><div class="l">Asistencias</div></div>
       <div class="card stat"><div class="v">${noshow}</div><div class="l">Faltas</div></div></div>
     <div class="section-h">Historial</div>
-    <div class="card list">${hist.length ? hist.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${getClassType(s.classTypeId).color}"></span>
+    <div class="card list">${hist.length ? hist.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
       <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
       <span class="pill">${{ booked: 'Reservada', waitlist: 'En espera', attended: 'Asistió', noshow: 'Faltó' }[b.status]}</span></div>`).join('') : '<div class="empty">Sin reservas.</div>'}</div>
     <div class="modal-actions">
@@ -723,19 +750,75 @@ function viewAdminSchedule() {
   return `
     <div class="page-title"><h1>Clases y horario</h1></div>
     <div class="tabs"><button class="${tab === 'week' ? 'active' : ''}" data-a="sched-tab" data-t="week">Horario semanal</button>
+      <button class="${tab === 'cal' ? 'active' : ''}" data-a="sched-tab" data-t="cal">📅 Calendario de la temporada</button>
       <button class="${tab === 'types' ? 'active' : ''}" data-a="sched-tab" data-t="types">Tipos de clase</button></div>
-    ${tab === 'week' ? `
+    ${tab === 'cal' ? viewSeasonCalendar() : tab === 'week' ? `
       <div class="row between wrap" style="margin-bottom:10px"><p class="muted small" style="margin:0">El horario se repite cada semana. Pulsa en un horario para gestionar su <b>grupo fijo</b>: sus clientes tendrán plaza reservada automáticamente cada semana.</p>
-        <button class="btn primary" data-a="slot-add">${icon('plus', 'width="18" height="18"')}Añadir horario</button></div>
+        <div class="row wrap"><button class="btn" data-a="auto-colors">🎨 Un color por turno</button>
+        <button class="btn" data-a="season-all">📆 Temporada de todos los turnos</button>
+        <button class="btn primary" data-a="slot-add">${icon('plus', 'width="18" height="18"')}Añadir horario</button></div></div>
       <div class="week-grid">${order.map(w => `<div class="week-col"><h4>${DOW_LONG[w]}</h4>
-        ${db.schedule.filter(t => t.weekday === w).sort((a, b) => a.time.localeCompare(b.time)).map(t => { const ct = getClassType(t.classTypeId); return ct ? `<div class="slot clickable ${ct.hidden ? 'is-hidden' : ''}" style="--c:${ct.color}" data-a="slot-open" data-id="${t.id}" title="Ver grupo fijo"><div><b>${t.time}</b> ${esc(ct.name)}${ct.hidden ? ' 🙈' : ''}
-          <div class="slot-members ${(t.members || []).length > ct.capacity ? 'over' : ''}">👥 ${(t.members || []).length}/${ct.capacity}</div></div><button class="x" data-a="slot-del" data-id="${t.id}" title="Quitar">×</button></div>` : ''; }).join('') || '<div class="muted small">—</div>'}
+        ${db.schedule.filter(t => t.weekday === w).sort((a, b) => a.time.localeCompare(b.time)).map(t => { const ct = getClassType(t.classTypeId); return ct ? `<div class="slot clickable ${ct.hidden ? 'is-hidden' : ''}" style="--c:${slotColor(t)}" data-a="slot-open" data-id="${t.id}" title="Ver grupo fijo"><div><b>${t.time}</b> ${esc(ct.name)}${ct.hidden ? ' 🙈' : ''}
+          <div class="slot-members ${(t.members || []).length > slotCapacity(t) ? 'over' : ''}">👥 ${(t.members || []).length}/${slotCapacity(t)}${t.capacity ? ' plazas' : ''}</div>
+          ${t.startDate || t.endDate || (t.visibleDays != null && t.visibleDays !== '') ? `<div class="slot-members">📆 ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · 👁 ${t.visibleDays} d` : ''}</div>` : ''}</div><button class="x" data-a="slot-del" data-id="${t.id}" title="Quitar">×</button></div>` : ''; }).join('') || '<div class="muted small">—</div>'}
       </div>`).join('')}</div>` : `
       <div class="row between" style="margin-bottom:10px"><span></span><button class="btn primary" data-a="ct-edit">${icon('plus', 'width="18" height="18"')}Nuevo tipo de clase</button></div>
       <div class="card list">${db.classTypes.map(ct => `<div class="list-item clickable" data-a="ct-edit" data-id="${ct.id}">
         <span class="swatch" style="--c:${ct.color};width:18px;height:18px"></span>
         <div class="grow"><b>${esc(ct.name)}</b> ${ct.hidden ? '<span class="pill">🙈 Oculta</span>' : ''}<div class="muted small">${esc(ct.coach)} · ${ct.duration} min · ${ct.capacity} plazas</div></div>
         <span class="muted small">${db.schedule.filter(t => t.classTypeId === ct.id).length} horarios/sem</span></div>`).join('')}</div>`}`;
+}
+
+// Muestrario de colores para los turnos (al pulsar uno se copia al selector)
+const colorSwatches = (current, name) => TURN_COLORS.map(c =>
+  `<button type="button" class="swatch-btn ${String(current).toLowerCase() === c.toLowerCase() ? 'on' : ''}" style="--c:${c}" data-a="pick-color" data-c="${c}" data-target="${name}" title="${c}"></button>`).join('');
+const monthLastDay = ym => { const [y, m] = ym.split('-').map(Number); return dateKey(new Date(y, m, 0)); };
+const seasonText = t => !t.startDate && !t.endDate ? 'Todo el año'
+  : `${t.startDate ? MONTHS_FULL[parseKey(t.startDate).getMonth()].slice(0, 3) : '…'}–${t.endDate ? MONTHS_FULL[parseKey(t.endDate).getMonth()].slice(0, 3) + ' ' + String(parseKey(t.endDate).getFullYear()).slice(2) : 'sin fin'}`;
+// Calendario de toda la temporada, semana a semana (el administrador ve todo; marca lo que ya ven los socios)
+const MONTHS_FULL = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+function viewSeasonCalendar() {
+  const thisWeek = weekStart(new Date());
+  const lastWeek = weekStart(parseKey(seasonEnd()));
+  let ws = state.calWeek ? parseKey(state.calWeek) : thisWeek;
+  if (ws < thisWeek) ws = thisWeek;
+  if (ws > lastWeek) ws = lastWeek;
+  state.calWeek = dateKey(ws);
+  const we = addDays(ws, 6);
+  const label = ws.getMonth() === we.getMonth()
+    ? `${ws.getDate()} al ${we.getDate()} de ${MONTHS_FULL[we.getMonth()]}`
+    : `${ws.getDate()} de ${MONTHS_FULL[ws.getMonth()]} al ${we.getDate()} de ${MONTHS_FULL[we.getMonth()]}`;
+  const weeksLeft = Math.round((lastWeek - ws) / (7 * 86400000));
+  const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(ws, i));
+  const today = dateKey(new Date());
+  return `
+    <div class="cal-nav card">
+      <button class="btn" data-a="cal-week" data-d="-1" ${ws <= thisWeek ? 'disabled' : ''}>‹ Anterior</button>
+      <div class="cal-title"><b>Semana del ${label}</b><div class="muted small">${weeksLeft ? `Quedan ${weeksLeft} semanas de temporada (hasta el ${parseKey(seasonEnd()).getDate()} de ${MONTHS_FULL[parseKey(seasonEnd()).getMonth()]} de ${parseKey(seasonEnd()).getFullYear()})` : 'Última semana de la temporada'}</div></div>
+      <button class="btn" data-a="cal-week" data-d="1" ${ws >= lastWeek ? 'disabled' : ''}>Siguiente ›</button>
+    </div>
+    <div class="row wrap" style="margin:8px 0 10px;gap:6px">
+      <button class="btn sm" data-a="cal-week" data-d="0">Esta semana</button>
+      <button class="btn sm" data-a="cal-week" data-d="4">+1 mes</button>
+      <span class="muted small" style="margin-left:auto">👁 = ya lo ven los socios · 🔒 = todavía no</span>
+    </div>
+    <div class="week-grid">${days.map(d => {
+      const k = dateKey(d);
+      const real = sessionsOn(k);
+      const items = [...real, ...projectedSessions(k)].sort((a, b) => a.time.localeCompare(b.time));
+      return `<div class="week-col ${k === today ? 'today' : ''}"><h4>${DOW_LONG[d.getDay()]} ${d.getDate()}</h4>
+        ${items.map(s => {
+          const ct = getClassType(s.classTypeId); if (!ct) return '';
+          const n = s.projected ? s.members : bookedIn(s.id).length;
+          const vis = !s.cancelled && isVisibleToClients(s);
+          const past = sessionStart(s) <= new Date();
+          return `<div class="slot clickable ${s.cancelled ? 'cancelled' : ''} ${isHidden(s) ? 'is-hidden' : ''}" style="--c:${sessionColor(s)}"
+              data-a="cal-open" ${s.projected ? `data-slot="${s.templateId}" data-k="${k}"` : `data-id="${s.id}"`} title="${s.projected ? 'Clase prevista: se crea al abrirla' : ''}">
+            <div><b>${s.time}</b> ${esc(ct.name)}
+              <div class="slot-members ${n > s.capacity ? 'over' : ''}">${s.cancelled ? '❌ Cancelada' : `👥 ${n}/${s.capacity}${s.projected ? ' previstos' : ''}`} ${past ? '' : vis ? '· 👁' : '· 🔒'}</div></div></div>`;
+        }).join('') || '<div class="muted small">—</div>'}</div>`;
+    }).join('')}</div>
+    <p class="muted small" style="margin-top:10px">Los socios ven las clases con ${db.settings.publishMode === 'weekly' ? 'la publicación semanal de Ajustes' : `${db.settings.bookWindowDays} días de antelación`} (cada día aparece uno más), salvo los turnos con antelación propia. Tú las ves todas. Pulsa una clase para ver quién va, cambiar plazas o cancelarla.</p>`;
 }
 
 function openClassTypeForm(id) {
@@ -763,7 +846,24 @@ function openSlotForm(oneOff = false) {
       ${oneOff ? `<div class="field"><label>Fecha</label><input name="date" type="date" required value="${state.date}"></div>
         <label class="check"><input type="checkbox" name="hidden"> 🙈 Crearla oculta (no la verán los clientes)</label>`
       : `<div class="field"><label>Días de la semana</label><div class="row wrap">${[1, 2, 3, 4, 5, 6, 0].map(w => `<label class="check" style="margin:0 8px 4px 0"><input type="checkbox" name="wd" value="${w}"> ${DOW[w]}</label>`).join('')}</div></div>`}
-      <div class="field"><label>Hora de inicio</label><input name="time" type="time" required value="18:00"></div>
+      <div class="fields-2">
+        <div class="field"><label>Hora de inicio</label><input name="time" type="time" required value="18:00"></div>
+        <div class="field"><label>Plazas</label><input name="capacity" type="number" min="1" max="200" placeholder="${db.classTypes[0]?.capacity ?? 20}" value="${db.classTypes[0]?.capacity ?? 20}"></div>
+      </div>
+      <p class="muted small" style="margin-top:-4px">Las plazas se pueden cambiar luego en cada turno.</p>
+      ${oneOff ? '' : `
+      <div class="field"><label>Color del turno</label>
+        <div class="row wrap">${colorSwatches(TURN_COLORS[db.schedule.length ? new Set(db.schedule.map(t => t.time)).size % TURN_COLORS.length : 0], 'new-color')}
+          <input type="color" name="color" id="new-color-custom" value="${TURN_COLORS[db.schedule.length ? new Set(db.schedule.map(t => t.time)).size % TURN_COLORS.length : 0]}" style="width:44px;height:32px;padding:2px;border-radius:8px;border:1px solid var(--border)"></div></div>
+      <div class="section-h" style="margin-top:4px">Temporada</div>
+      <div class="fields-2">
+        <div class="field"><label>Desde (mes)</label><input name="from" type="month" value="${dateKey(new Date()).slice(0, 7)}"></div>
+        <div class="field"><label>Hasta (mes)</label><input name="to" type="month" value="${defaultSeasonEnd().slice(0, 7)}"></div>
+      </div>
+      <p class="muted small" style="margin-top:-4px">Se repite todas las semanas de esos meses. Deja «Hasta» vacío si no tiene fin.</p>
+      <div class="field"><label>Los socios lo ven con estos días de antelación</label>
+        <input name="visibleDays" type="number" min="0" max="120" placeholder="Lo general: ${db.settings.bookWindowDays} días"></div>
+      <p class="muted small" style="margin-top:-4px">Vacío = lo que tengas en Ajustes. Cada día que pasa aparece un día más. Tú lo ves siempre todo.</p>`}
       <div class="modal-actions"><button type="button" class="btn" data-a="close">Cancelar</button><button class="btn primary" type="submit">Añadir</button></div>
     </form>`);
 }
@@ -794,7 +894,7 @@ function viewAdminSettings() {
           <option value="weekly" ${s.publishMode === 'weekly' ? 'selected' : ''}>La semana siguiente se publica un día y hora fijos</option>
         </select></div>
       <div class="fields-2 ${s.publishMode === 'rolling' ? '' : 'hidden'}" id="pub-rolling">
-        <div class="field"><label>Días de antelación</label><input name="bookWindowDays" type="number" min="1" max="60" value="${s.bookWindowDays}"></div>
+        <div class="field"><label>Días que ven los socios por delante (cada día aparece uno más)</label><input name="bookWindowDays" type="number" min="1" max="120" value="${s.bookWindowDays}"></div>
       </div>
       <div class="fields-2 ${s.publishMode === 'weekly' ? '' : 'hidden'}" id="pub-weekly">
         <div class="field"><label>Día de publicación</label><select name="publishWeekday">${[1, 2, 3, 4, 5, 6, 0].map(w => `<option value="${w}" ${s.publishWeekday === w ? 'selected' : ''}>${DOW_LONG[w]}</option>`).join('')}</select></div>
@@ -964,6 +1064,54 @@ const actions = {
   'bulk-block-ok': () => { state.sel.forEach(id => blockUser(id, 'Cuota pendiente de pago', { email: false })); toast('Clientes bloqueados', 'ok'); state.sel.clear(); closeModal(); render(); },
   'bulk-unblock': () => { state.sel.forEach(id => { if (getUser(id).blocked) unblockUser(id, false); }); toast('Clientes desbloqueados', 'ok'); state.sel.clear(); render(); },
   'slot-open': d => openSlot(d.id),
+  'cal-week': d => {
+    const n = Number(d.d);
+    state.calWeek = n === 0 ? dateKey(weekStart(new Date())) : dateKey(addDays(parseKey(state.calWeek), 7 * n));
+    render();
+  },
+  'cal-open': d => {
+    if (d.id) return openSession(d.id);
+    const s = materializeSession(d.slot, d.k);
+    openSession(s.id); render();
+  },
+  'pick-color': d => {
+    const inp = document.getElementById(d.target + '-custom'); if (inp) inp.value = d.c;
+    document.querySelectorAll(`[data-a="pick-color"][data-target="${d.target}"]`).forEach(b => b.classList.toggle('on', b.dataset.c === d.c));
+  },
+  'turn-color-save': d => {
+    setTurnColor(d.id, $('#turn-color-custom').value, $('#turn-color-all').checked);
+    toast('Color del turno guardado', 'ok'); openSlot(d.id); render();
+  },
+  'auto-colors': () => confirmModal('Un color por turno', 'Cada hora de turno tendrá un color distinto (por ejemplo, todas las clases de las 19:30 en el mismo color). Luego puedes cambiar cualquiera.', 'data-a="auto-colors-ok"', 'Poner colores', false),
+  'auto-colors-ok': () => { autoTurnColors(); closeModal(); toast('Colores repartidos', 'ok'); render(); },
+  'season-all': () => openModal(`${modalHead('Temporada de todos los turnos')}
+      <p>Se aplica a los <b>${db.schedule.length}</b> huecos del horario semanal. Luego puedes cambiar cualquier turno por separado.</p>
+      <div class="fields-2">
+        <div class="field"><label>Desde (mes)</label><input id="season-from" type="month" value="${dateKey(new Date()).slice(0, 7)}"></div>
+        <div class="field"><label>Hasta (mes)</label><input id="season-to" type="month" value="${defaultSeasonEnd().slice(0, 7)}"></div>
+      </div>
+      <div class="field"><label>Días de antelación para los socios</label><input id="season-vis" type="number" min="0" max="120" placeholder="Vacío = lo general de Ajustes (${db.settings.bookWindowDays} días)"></div>
+      <p class="muted small">Si una clase ya reservada queda fuera de la temporada, se cancela y se avisa a los apuntados.</p>
+      <div class="modal-actions"><button class="btn" data-a="close">Cancelar</button><button class="btn primary" data-a="season-all-ok">Aplicar a todos</button></div>`),
+  'season-all-ok': () => {
+    const from = $('#season-from').value, to = $('#season-to').value, vd = $('#season-vis').value.trim();
+    const season = { startDate: from ? from + '-01' : null, endDate: to ? monthLastDay(to) : null, visibleDays: vd === '' ? null : Math.max(0, Number(vd)) };
+    if (season.startDate && season.endDate && season.endDate < season.startDate) return toast('«Hasta» no puede ser antes que «Desde»', 'err');
+    db.schedule.forEach(t => setSlotSeason(t.id, season, { ensure: false }));
+    ensureSessions();
+    toast('Temporada aplicada a todos los turnos', 'ok'); closeModal(); render();
+  },
+  'slot-season': d => {
+    const from = $('#season-from').value, to = $('#season-to').value, vd = $('#season-vis').value.trim();
+    setSlotSeason(d.id, { startDate: from ? from + '-01' : null, endDate: to ? monthLastDay(to) : null, visibleDays: vd === '' ? null : Math.max(0, Number(vd)) });
+    toast('Temporada del turno guardada', 'ok'); openSlot(d.id); render();
+  },
+  'slot-cap': d => {
+    const t = getSlot(d.id), ct = getClassType(t.classTypeId);
+    const v = Math.max(1, Number($('#slot-cap').value) || 0);
+    setSlotCapacity(d.id, v === ct.capacity ? null : v);
+    toast(`Turno con ${v} plazas`, 'ok'); openSlot(d.id); render();
+  },
   'group-add': d => {
     const ids = [...document.querySelectorAll('input[name="gadd"]:checked')].map(x => x.value);
     if (!ids.length) return toast('Marca al menos un cliente', 'err');
@@ -1047,7 +1195,13 @@ const forms = {
   slot: (f) => {
     const wds = f.getAll('wd').map(Number);
     if (!wds.length) return toast('Marca al menos un día', 'err');
-    wds.forEach(w => addScheduleSlot(w, f.get('time'), f.get('classTypeId')));
+    const ct = getClassType(f.get('classTypeId'));
+    const cap = Number(f.get('capacity')) || null;
+    // si coincide con el del tipo de clase, el turno sigue al tipo de clase
+    const from = f.get('from'), to = f.get('to'), vd = String(f.get('visibleDays') || '').trim();
+    const season = { startDate: from ? from + '-01' : null, endDate: to ? monthLastDay(to) : null, visibleDays: vd === '' ? null : Math.max(0, Number(vd)), color: f.get('color') || null };
+    if (season.startDate && season.endDate && season.endDate < season.startDate) return toast('«Hasta» no puede ser antes que «Desde»', 'err');
+    wds.forEach(w => addScheduleSlot(w, f.get('time'), f.get('classTypeId'), cap && cap !== ct.capacity ? cap : null, season));
     toast('Horario añadido', 'ok'); closeModal(); render();
   },
   multiadd: (f, form) => {
@@ -1062,7 +1216,10 @@ const forms = {
     const n = blockUser(form.dataset.id, f.get('reason').trim(), { cancelFuture: f.get('cancelFuture') === 'on', email: f.get('email') === 'on' });
     toast(`Cliente bloqueado${n ? ` y quitado de ${n} clase(s)` : ''}`, 'ok'); openClient(form.dataset.id); render();
   },
-  oneoff: (f) => { addOneOffSession(f.get('date'), f.get('time'), f.get('classTypeId'), f.get('hidden') === 'on'); state.date = f.get('date'); toast('Clase extra creada', 'ok'); closeModal(); render(); },
+  oneoff: (f) => {
+    addOneOffSession(f.get('date'), f.get('time'), f.get('classTypeId'), f.get('hidden') === 'on');
+    const cap = Number(f.get('capacity')); if (cap) { db.sessions[db.sessions.length - 1].capacity = cap; saveDB(); }
+    state.date = f.get('date'); toast('Clase extra creada', 'ok'); closeModal(); render(); },
   ann: (f, form) => {
     saveAnnouncement({ id: form.dataset.id || undefined, title: f.get('title').trim(), body: f.get('body').trim(), pinned: f.get('pinned') === 'on' });
     toast(form.dataset.id ? 'Anuncio guardado' : 'Anuncio publicado y clientes avisados', 'ok'); closeModal(); render();

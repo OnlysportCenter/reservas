@@ -253,8 +253,8 @@ function renderImportInner() {
   const proj = {};
   db.schedule.forEach(t => proj[t.id] = new Set(t.members));
   parsed.filter(p => p.status === 'new' || p.status === 'update').forEach((p, i) => p.groups.slots.forEach(sid => proj[sid].add(p.existing?.id || 'new' + i)));
-  const over = db.schedule.filter(t => proj[t.id].size > getClassType(t.classTypeId).capacity)
-    .map(t => `${slotLabel(t)} (${proj[t.id].size}/${getClassType(t.classTypeId).capacity})`);
+  const over = db.schedule.filter(t => proj[t.id].size > slotCapacity(t))
+    .map(t => `${slotLabel(t)} (${proj[t.id].size}/${slotCapacity(t)})`);
   const planValues = imp.map.plan ? [...new Set(imp.rows.map(r => String(r[imp.map.plan] ?? '').trim()).filter(Boolean))] : [];
   const colOpts = sel => `<option value="">— No importar —</option>${imp.cols.map(c => `<option value="${esc(c)}" ${sel === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}`;
   const st = { new: '<span class="pill ok">Nuevo</span>', update: '<span class="pill warn">Actualizar</span>', skip: '<span class="pill">Ya existe</span>', error: '<span class="pill danger">Error</span>' };

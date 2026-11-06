@@ -30,7 +30,7 @@
   const TABLES = {
     plans: { db: 'plans', cols: { id: null, name: '', type: 'weekly', per_week: null, credits: null, duration_days: 30, price: 0 } },
     classTypes: { db: 'class_types', cols: { id: null, name: '', color: '#2F5D8A', coach: '', capacity: 20, duration: 60, description: '', hidden: false } },
-    schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [] } },
+    schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null } },
     users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
     sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false } },
@@ -54,7 +54,8 @@
     for (const [col, def] of Object.entries(TABLES[t].cols)) {
       let v = o[toCamel(col)];
       if (v === undefined) v = typeof def === 'function' ? def() : def;
-      if (col === 'price' || col === 'capacity' || col === 'duration') v = v === null ? v : Number(v);
+      if (col === 'price' || col === 'capacity' || col === 'duration' || col === 'visible_days') v = (v === null || v === '') ? null : Number(v);
+      if ((col === 'start_date' || col === 'end_date') && v === '') v = null;
       r[col] = v;
     }
     return r;

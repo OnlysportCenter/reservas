@@ -91,6 +91,8 @@ function seedDB() {
   slot([1, 2, 4], '19:30');
   slot([1, 2, 4], '20:30');
   slot([1, 2, 4], '21:30');
+  const times = [...new Set(schedule.map(t => t.time))].sort();
+  schedule.forEach(t => t.color = TURN_COLORS[times.indexOf(t.time) % TURN_COLORS.length]);
 
   const today = startOfDay(new Date());
   const exp = n => dateKey(addDays(today, n));
@@ -118,7 +120,7 @@ function seedDB() {
       brand: { logo: null, primary: '#0E0E0D', theme: 'light', subtitle: 'Center' },
       cancelHours: 2,          // horas mínimas para cancelar con devolución
       publishMode: 'rolling',  // 'rolling' = X días por delante | 'weekly' = se publica la semana siguiente un día y hora fijos
-      bookWindowDays: 7,       // modo rolling: días visibles/reservables por delante
+      bookWindowDays: 14,      // modo rolling: días visibles/reservables por delante (como en Bookyway: 2 semanas)
       publishWeekday: 0,       // modo weekly: día en que se publica la semana siguiente (0 = domingo)
       publishTime: '20:00',    // modo weekly: hora de publicación
       weeklyLimit: 0,          // solo bonos por nº de clases: máximo por semana (0 = sin límite)
@@ -150,20 +152,22 @@ function seedDB() {
 }
 
 // ---------- Generación de sesiones a partir del horario semanal ----------
+// ¿Está el turno activo esa fecha? (temporada desde / hasta)
+const slotInSeason = (t, key) => (!t.startDate || key >= t.startDate) && (!t.endDate || key <= t.endDate);
 function ensureSessions() {
   const today = startOfDay(new Date());
-  const horizon = Math.max(db.settings.bookWindowDays, 14) + 7;
+  const horizon = Math.max(db.settings.bookWindowDays, 14, ...db.schedule.map(t => Number(t.visibleDays) || 0)) + 7;
   const existing = new Set(db.sessions.filter(s => s.templateId).map(s => s.templateId + '|' + s.date));
   let added = false;
   for (let d = 0; d <= horizon; d++) {
     const date = addDays(today, d);
     const key = dateKey(date);
     const wd = date.getDay();
-    db.schedule.filter(t => t.weekday === wd).forEach(t => {
+    db.schedule.filter(t => t.weekday === wd && slotInSeason(t, key)).forEach(t => {
       if (existing.has(t.id + '|' + key)) return;
       const ct = getClassType(t.classTypeId);
       if (!ct) return;
-      const s = { id: uid(), templateId: t.id, classTypeId: ct.id, date: key, time: t.time, duration: ct.duration, capacity: ct.capacity, coach: ct.coach, cancelled: false, hidden: false };
+      const s = { id: uid(), templateId: t.id, classTypeId: ct.id, date: key, time: t.time, duration: ct.duration, capacity: slotCapacity(t), coach: ct.coach, cancelled: false, hidden: false };
       db.sessions.push(s);
       (t.members || []).forEach(m => groupBook(m, s));
       added = true;
@@ -187,6 +191,34 @@ function groupBook(userId, s) {
   return true;
 }
 const getSlot = id => db.schedule.find(t => t.id === id);
+// Color del turno: el suyo propio o, si no tiene, el del tipo de clase
+const TURN_COLORS = ['#2F5D8A', '#C0392B', '#6B7A2E', '#E07B39', '#6D4C9F', '#2A9D8F', '#9A4B2E', '#D4A017', '#C2185B', '#455A64', '#1F8F4E', '#5D4037'];
+const slotColor = t => (t && t.color) || getClassType(t?.classTypeId)?.color || '#2F5D8A';
+const sessionColor = s => { const t = s.templateId && db.schedule.find(x => x.id === s.templateId); return t ? slotColor(t) : (getClassType(s.classTypeId)?.color || '#2F5D8A'); };
+// Pone el color a todos los días del mismo turno (misma hora y tipo de clase)
+function setTurnColor(slotId, color, allDays = true) {
+  const t = getSlot(slotId);
+  (allDays ? db.schedule.filter(x => x.time === t.time && x.classTypeId === t.classTypeId) : [t]).forEach(x => x.color = color || null);
+  saveDB();
+}
+// Un color distinto para cada hora de turno
+function autoTurnColors() {
+  const times = [...new Set(db.schedule.map(t => t.time))].sort();
+  db.schedule.forEach(t => t.color = TURN_COLORS[times.indexOf(t.time) % TURN_COLORS.length]);
+  saveDB();
+}
+// Plazas del turno: las suyas propias o, si no tiene, las del tipo de clase
+const slotCapacity = t => (t.capacity ?? null) !== null && t.capacity !== '' ? Number(t.capacity) : (getClassType(t.classTypeId)?.capacity ?? 20);
+function setSlotCapacity(slotId, cap) {
+  const t = getSlot(slotId);
+  t.capacity = cap;
+  const n = slotCapacity(t);
+  db.sessions.filter(s => s.templateId === slotId && !s.cancelled && sessionStart(s) > new Date()).forEach(s => {
+    s.capacity = n;
+    promoteWaitlist(s.id);
+  });
+  saveDB();
+}
 const slotLabel = t => `${DOW_LONG[t.weekday]} ${t.time} · ${getClassType(t.classTypeId)?.name}`;
 const groupsOf = userId => db.schedule.filter(t => (t.members || []).includes(userId)).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7) || a.time.localeCompare(b.time));
 function addGroupMember(slotId, userId, { email = true, app = true } = {}) {
@@ -240,7 +272,13 @@ function publishDescription() {
   return `Puedes ver y reservar clases con hasta ${s.bookWindowDays} días de antelación.`;
 }
 function isHidden(s) { return s.hidden || getClassType(s.classTypeId)?.hidden; }
-function isVisibleToClients(s) { return !isHidden(s) && sessionStart(s) < visibleUntil(); }
+// Hasta cuándo ven los socios esta clase: antelación propia del turno o la general de Ajustes
+function sessionVisibleUntil(s) {
+  const t = s.templateId && db.schedule.find(x => x.id === s.templateId);
+  const vd = t && t.visibleDays !== null && t.visibleDays !== undefined && t.visibleDays !== '' ? Number(t.visibleDays) : null;
+  return vd !== null ? addDays(startOfDay(new Date()), vd + 1) : visibleUntil();
+}
+function isVisibleToClients(s) { return !isHidden(s) && sessionStart(s) < sessionVisibleUntil(s); }
 
 // ---------- Consultas ----------
 const getUser = id => db.users.find(u => u.id === id);
@@ -512,7 +550,53 @@ function setAttendance(bookingId, status) { getBooking(bookingId).status = statu
 function updateSessionCapacity(sessionId, cap) { getSession(sessionId).capacity = cap; promoteWaitlist(sessionId); saveDB(); }
 
 // ---------- Horario semanal ----------
-function addScheduleSlot(weekday, time, classTypeId) { db.schedule.push({ id: uid(), weekday, time, classTypeId, members: [] }); ensureSessions(); saveDB(); }
+function addScheduleSlot(weekday, time, classTypeId, capacity = null, { startDate = null, endDate = null, visibleDays = null, color = null } = {}) {
+  db.schedule.push({ id: uid(), weekday, time, classTypeId, members: [], capacity, startDate, endDate, visibleDays, color });
+  ensureSessions(); saveDB();
+}
+// Cambiar temporada y antelación de un turno: quita las clases que quedan fuera y crea las que entran
+function setSlotSeason(slotId, { startDate = null, endDate = null, visibleDays = null }, { ensure = true } = {}) {
+  const t = getSlot(slotId);
+  Object.assign(t, { startDate, endDate, visibleDays });
+  const now = new Date();
+  db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > now && !slotInSeason(t, s.date)).forEach(s => {
+    if (bookedIn(s.id).length || waitlistOf(s.id).length) cancelSession(s.id, 'fuera de la temporada del turno');
+    else db.sessions = db.sessions.filter(x => x.id !== s.id);
+  });
+  saveDB();
+  if (ensure) ensureSessions();
+}
+// Clases lejanas que aún no existen: se calculan a partir del horario (para el calendario del administrador)
+function projectedSessions(key) {
+  const d = parseKey(key);
+  return db.schedule.filter(t => t.weekday === d.getDay() && slotInSeason(t, key) && getClassType(t.classTypeId))
+    .filter(t => !db.sessions.some(s => s.templateId === t.id && s.date === key))
+    .map(t => ({ projected: true, templateId: t.id, classTypeId: t.classTypeId, date: key, time: t.time, capacity: slotCapacity(t),
+      duration: getClassType(t.classTypeId).duration, coach: getClassType(t.classTypeId).coach, members: t.members.length }));
+}
+// Crear ya una clase futura del horario (al abrirla desde el calendario) con sus reservas de grupo
+function materializeSession(slotId, key) {
+  const t = getSlot(slotId), ct = getClassType(t.classTypeId);
+  const found = db.sessions.find(s => s.templateId === slotId && s.date === key);
+  if (found) return found;
+  const s = { id: uid(), templateId: t.id, classTypeId: ct.id, date: key, time: t.time, duration: ct.duration, capacity: slotCapacity(t), coach: ct.coach, cancelled: false, hidden: false };
+  db.sessions.push(s);
+  t.members.forEach(m => groupBook(m, s));
+  saveDB();
+  return s;
+}
+// Hasta dónde llega la temporada (para el calendario): la fecha de fin más lejana, o un año
+function seasonEnd() {
+  const ends = db.schedule.map(t => t.endDate).filter(Boolean).sort();
+  const noEnd = db.schedule.some(t => !t.endDate);
+  const yearAhead = dateKey(addDays(new Date(), 365));
+  return noEnd || !ends.length ? yearAhead : ends[ends.length - 1];
+}
+// Temporada por defecto: hasta el 30 de junio que viene
+function defaultSeasonEnd() {
+  const d = new Date(); const y = d.getMonth() >= 6 ? d.getFullYear() + 1 : d.getFullYear();
+  return `${y}-06-30`;
+}
 function removeScheduleSlot(slotId) {
   const now = new Date();
   db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > now).forEach(s => {
@@ -533,7 +617,9 @@ function saveClassType(data) {
     Object.assign(ct, data);
     db.sessions.filter(s => s.classTypeId === ct.id && sessionStart(s) > new Date()).forEach(s => {
       s.coach = ct.coach; s.duration = ct.duration;
-      if (bookedIn(s.id).length <= ct.capacity) s.capacity = ct.capacity;
+      const t = s.templateId && getSlot(s.templateId);
+      const hasOwn = t && t.capacity !== null && t.capacity !== undefined && t.capacity !== '';
+      if (!hasOwn && bookedIn(s.id).length <= ct.capacity) s.capacity = ct.capacity;
       promoteWaitlist(s.id);
     });
   } else {

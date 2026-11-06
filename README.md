@@ -83,6 +83,17 @@ Figtree, como la web. Los datos de ejemplo usan los turnos reales de la web.
 - Clientes › «Nuevos en espera»: lista (solo administrador) de personas que preguntan por plaza,
   con nombre, apellidos, teléfono y correo, por orden de llegada. «Dar de alta» la convierte en cliente.
 
+**Temporada y antelación:**
+- Cada turno tiene temporada (desde / hasta, por meses) y, opcional, sus propios días de antelación
+  para los socios. Clases › Horario semanal › «Temporada de todos los turnos» la pone a todos.
+- Clases › «Calendario de la temporada»: semana a semana hasta el final de la temporada. Las clases
+  lejanas salen como «previstas» y se crean al abrirlas (o solas cuando se acercan).
+- Ajustes › «Días que ven los socios por delante»: cada día aparece uno más (14 = como Bookyway).
+
+**Colores por turno:** cada turno (misma hora) puede tener su color; se elige al crearlo o en su
+ficha («Todos los días de las 19:30»). Clases › «Un color por turno» los reparte automáticamente.
+Se ve en el horario, el calendario, la agenda y la app de los socios.
+
 ## Modo servidor (Supabase + GitHub Pages + Gmail)
 - Si `js/config.js` tiene la dirección y la clave pública de Supabase, la app usa el servidor:
   clientes entran con un código de 6 cifras al email; el administrador con email y contraseña.
