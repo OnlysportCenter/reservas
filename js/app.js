@@ -233,25 +233,26 @@ function viewClientBook() {
         const full = freeSpots(s) <= 0;
         let act, extra = '';
         if (s.cancelled) act = '<span class="pill danger">Cancelada</span>';
-        else if (b?.status === 'booked') act = `<span class="pill ok">✓ Reservada</span>${!started ? `<button class="btn sm danger" data-a="cancel-booking" data-id="${b.id}">Cancelar</button>` : ''}`;
+        else if (b?.status === 'booked') act = `<span class="pill ok booked-pill">✓ Reservada</span>${!started ? `<button class="btn btn-big danger" data-a="cancel-booking" data-id="${b.id}">Cancelar</button>` : ''}`;
         else if (b?.status === 'waitlist') {
-          act = `<button class="btn sm" data-a="cancel-booking" data-id="${b.id}">Salir de la lista</button>`;
+          act = `<button class="btn btn-big" data-a="cancel-booking" data-id="${b.id}">Salir de la lista</button>`;
           extra = `<div class="wl-pos">En lista de espera · vas el <b>nº ${waitlistPosition(b)}</b></div>`;
           if (!canUseFor(u, s).ok) extra += `<div class="muted small" style="margin-top:4px">Entrarás en cuanto te quites de otra clase ${db.settings.onePerDay && db.bookings.some(x => x.userId === u.id && x.status === 'booked' && getSession(x.sessionId)?.date === s.date) ? 'de ese día' : 'de esa semana'}.</div>`;
         }
         else if (started) act = '<span class="pill">Finalizada</span>';
         else if (ps.blocked) act = '<span class="pill">Bloqueado</span>';
-        else if (full) act = db.settings.waitlistEnabled ? `<button class="btn sm" data-a="book" data-id="${s.id}">Apuntarme a la lista de espera</button>` : '';
+        else if (full) act = db.settings.waitlistEnabled ? `<button class="btn btn-big" data-a="book" data-id="${s.id}">Lista de espera</button>` : '';
         else if (ps.ok && !canUseFor(u, s).ok) {
           // ya tiene sus clases (semana completa u otra clase ese día): puede esperar aquí sin gastar clase
-          act = db.settings.waitlistEnabled ? `<button class="btn sm" data-a="book" data-id="${s.id}">Apuntarme en espera</button>` : '';
+          act = db.settings.waitlistEnabled ? `<button class="btn btn-big" data-a="book" data-id="${s.id}">Apuntarme en espera</button>` : '';
           extra = `<div class="muted small" style="margin-top:4px">Ya tienes tus clases ${/ese día/.test(canUseFor(u, s).msg) ? 'de ese día' : 'de esta semana'}. Si te apuntas, entrarás cuando te quites de otra.</div>`;
         }
-        else act = `<button class="btn sm primary" data-a="book" data-id="${s.id}">Reservar</button>`;
-        return `<div class="card session ${s.cancelled ? 'cancelled' : ''}" style="--c:${sessionColor(s)}">
+        else act = `<button class="btn btn-big primary" data-a="book" data-id="${s.id}">Reservar</button>`;
+        return `<div class="card session ${s.cancelled ? 'cancelled' : ''} ${b?.status === 'booked' && !s.cancelled ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
-          <div class="info"><div class="name">${esc(ct.name)}</div>${s.cancelled ? '' : spotsInfo(s)}${extra}</div>
-          <div class="act">${act}</div></div>`;
+          <div class="info"><div class="name">${esc(ct.name)}</div>${s.cancelled ? '' : spotsInfo(s)}</div>
+          <div class="act">${act}</div>
+          ${extra ? `<div class="session-extra">${extra}</div>` : ''}</div>`;
       }).join('') : `<div class="empty">${icon('cal')}<div>No hay clases este día.</div></div>`}
     </div>
     <p class="muted small" style="text-align:center;margin-top:16px">${esc(publishDescription())}</p>`;
@@ -273,11 +274,11 @@ function viewClientMine() {
       ${items.length ? items.map(({ b, s }) => {
         const ct = getClassType(s.classTypeId);
         const canCancel = state.mineTab === 'next' && sessionStart(s) > now;
-        return `<div class="card session" style="--c:${sessionColor(s)}">
+        return `<div class="card session ${b.status === 'booked' || b.status === 'attended' ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${fmtDateShort(s.date)}</div></div>
           <div class="info"><div class="name">${esc(ct.name)}</div><div class="meta">${s.duration} min</div>
             ${canCancel && b.status === 'booked' && isLateCancel(s) ? `<div class="small" style="color:var(--warn);margin-top:4px">Fuera de plazo de cancelación gratuita</div>` : ''}</div>
-          <div class="act">${statusPill(b)}${canCancel ? `<button class="btn sm ${b.status === 'booked' ? 'danger' : ''}" data-a="cancel-booking" data-id="${b.id}">${b.status === 'booked' ? 'Cancelar' : 'Salir'}</button>` : ''}</div></div>`;
+          <div class="act">${statusPill(b)}${canCancel ? `<button class="btn btn-big ${b.status === 'booked' ? 'danger' : ''}" data-a="cancel-booking" data-id="${b.id}">${b.status === 'booked' ? 'Cancelar' : 'Salir'}</button>` : ''}</div></div>`;
       }).join('') : `<div class="empty">${icon('check')}<div>${state.mineTab === 'next' ? 'No tienes clases reservadas.' : 'Aún no hay historial.'}</div>
         ${state.mineTab === 'next' ? '<button class="btn primary" style="margin-top:12px" data-a="nav" data-v="c-book">Reservar ahora</button>' : ''}</div>`}
     </div>`;

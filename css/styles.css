@@ -200,6 +200,19 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .notif-banner .nb-text span { color: #5E5B55; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .notif-banner.out { opacity: 0; transform: translate(-50%, -20px); transition: all .5s; }
 @keyframes nb-in { from { opacity: 0; transform: translate(-50%, -24px); } }
+/* App del cliente: clase reservada en verde y botones grandes */
+.session.is-booked { background: var(--ok-bg); border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok) inset; }
+.session.is-booked .time { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.session.is-booked .booked-pill, .session.is-booked .pill.ok { background: var(--ok); color: #fff; }
+.session { flex-wrap: wrap; }
+.session .info { flex: 1 1 0; }
+.session .time { align-self: flex-start; }
+.session .act { flex: 0 0 auto; }
+.session-extra { flex-basis: 100%; padding-left: 80px; margin-top: -4px; }
+.session-extra .wl-pos { margin-top: 0; }
+.btn-big { padding: 11px 18px; font-size: 15px; border-radius: 12px; min-width: 112px; min-height: 44px; }
+.btn-big.danger { background: var(--danger-bg); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
+@media (max-width: 420px) { .btn-big { min-width: 100px; padding: 10px 14px; } }
 .bulk-bar { position: sticky; top: 60px; z-index: 10; margin-bottom: 10px; border-color: var(--accent); }
 .dropzone { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; border: 2px dashed var(--border); border-radius: 14px; cursor: pointer; text-align: center; }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--surface-2); }
