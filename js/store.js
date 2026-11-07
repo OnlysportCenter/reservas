@@ -574,6 +574,12 @@ function cancelSession(sessionId, reason = '', email = true) {
 }
 function restoreSession(sessionId) { getSession(sessionId).cancelled = false; saveDB(); }
 function toggleSessionHidden(sessionId) { const s = getSession(sessionId); s.hidden = !s.hidden; saveDB(); }
+// Asistencia automática: una reserva de una clase ya terminada cuenta como «asistió»
+// salvo que el centro marque «no vino».
+function attendStatus(b) {
+  if (b.status === 'booked') { const s = getSession(b.sessionId); if (s && !s.cancelled && sessionEnd(s) <= new Date()) return 'attended'; }
+  return b.status;
+}
 function setAttendance(bookingId, status) { getBooking(bookingId).status = status; saveDB(); }
 function updateSessionCapacity(sessionId, cap) { getSession(sessionId).capacity = cap; promoteWaitlist(sessionId); saveDB(); }
 

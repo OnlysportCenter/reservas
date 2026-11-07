@@ -42,8 +42,8 @@ function toast(msg, type = '') {
   $('#toast-root').appendChild(el);
   setTimeout(() => el.remove(), 3800);
 }
-function openModal(html) {
-  $('#modal-root').innerHTML = `<div class="modal-bg" data-a="bg"><div class="modal" role="dialog">${html}</div></div>`;
+function openModal(html, cls = '') {
+  $('#modal-root').innerHTML = `<div class="modal-bg" data-a="bg"><div class="modal ${cls}" role="dialog">${html}</div></div>`;
 }
 function closeModal() { $('#modal-root').innerHTML = ''; }
 const modalHead = title => `<div class="modal-h"><h2>${title}</h2><button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button></div>`;
@@ -295,7 +295,7 @@ function viewClientMine() {
   const next = mine.filter(x => sessionEnd(x.s) > now && !x.s.cancelled).sort((a, b) => sessionStart(a.s) - sessionStart(b.s));
   const past = mine.filter(x => sessionEnd(x.s) <= now).sort((a, b) => sessionStart(b.s) - sessionStart(a.s)).slice(0, 30);
   const items = state.mineTab === 'next' ? next : past;
-  const statusPill = b => ({ booked: '<span class="pill ok">Reservada</span>', waitlist: `<span class="pill warn">En espera · nº ${waitlistPosition(b)}</span>`, attended: '<span class="pill ok">Asististe</span>', noshow: '<span class="pill danger">No asististe</span>' }[b.status]);
+  const statusPill = b => ({ booked: '<span class="pill ok">Reservada</span>', waitlist: `<span class="pill warn">En espera · nº ${waitlistPosition(b)}</span>`, attended: '<span class="pill ok">Asististe</span>', noshow: '<span class="pill danger">No asististe</span>' }[attendStatus(b)]);
   return `
     <div class="page-title"><h1>Mis clases</h1></div>
     <div class="tabs"><button class="${state.mineTab === 'next' ? 'active' : ''}" data-a="mine-tab" data-t="next">Próximas (${next.length})</button>
@@ -332,7 +332,7 @@ function viewProfile() {
   const u = me(), p = getPlan(u.planId);
   const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
   const monthCount = db.bookings.filter(b => b.userId === u.id && ['booked', 'attended'].includes(b.status)).filter(b => { const s = getSession(b.sessionId); return s && sessionStart(s) >= monthStart && sessionStart(s) <= new Date(); }).length;
-  const total = db.bookings.filter(b => b.userId === u.id && b.status === 'attended').length;
+  const total = db.bookings.filter(b => b.userId === u.id && attendStatus(b) === 'attended').length;
   const ps = planStatus(u);
   return `
     <div class="page-title"><h1>Mi perfil</h1></div>
@@ -468,12 +468,13 @@ function viewAdminToday() {
   const dueCount = active.filter(c => c.paymentDue).length;
   const noPlan = active.filter(c => !planStatus(c).ok);
   return `
-    <div class="page-title"><h1>Hoy · ${fmtDateLong(today)}</h1></div>
+    <div class="page-title"><h1>${(() => { const h = new Date().getHours(); return h < 13 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches'; })()}</h1></div>
+    <p class="admin-hello">${fmtDateLong(today)} · ${ss.length} ${ss.length === 1 ? 'clase' : 'clases'} hoy</p>
     <div class="grid-stats">
-      <div class="card stat"><div class="v">${active.length}</div><div class="l">Clientes activos</div></div>
-      <div class="card stat"><div class="v">${booked}</div><div class="l">Reservas hoy</div></div>
-      <div class="card stat"><div class="v">${cap ? Math.round(booked / cap * 100) : 0}%</div><div class="l">Ocupación hoy</div></div>
-      <div class="card stat"><div class="v">${dueCount}</div><div class="l">Cuotas pendientes de ${monthName()}</div></div>
+      <div class="card kpi" style="--k:#2F5D8A"><div class="kpi-ic">${icon('users')}</div><div><div class="v">${active.length}</div><div class="l">Socios activos</div></div></div>
+      <div class="card kpi" style="--k:#1F7A45"><div class="kpi-ic">${icon('check')}</div><div><div class="v">${booked}</div><div class="l">Reservas hoy</div></div></div>
+      <div class="card kpi" style="--k:#6D4C9F"><div class="kpi-ic">${icon('grid')}</div><div><div class="v">${cap ? Math.round(booked / cap * 100) : 0}%</div><div class="l">Ocupación hoy</div></div></div>
+      <div class="card kpi" style="--k:#E8890C"><div class="kpi-ic">${icon('bell')}</div><div><div class="v">${dueCount}</div><div class="l">Cuotas pendientes</div></div></div>
     </div>
     <div class="section-h">Clases de hoy</div>
     <div class="stack">${ss.length ? ss.map(adminSessionCard).join('') : '<div class="card empty">Hoy no hay clases.</div>'}</div>
@@ -526,31 +527,69 @@ function openSession(id) {
   const bk = bookedIn(id), wl = waitlistOf(id);
   const past = sessionStart(s) <= new Date();
   const free = clients().filter(c => c.active && !userBookingIn(c.id, id));
-  openModal(`${modalHead(`${esc(ct.name)} · ${s.time}`)}
-    <p class="muted" style="margin-top:-8px">${fmtDateLong(s.date)} · ${s.duration} min · ${esc(s.coach)}</p>
-    ${s.cancelled ? '<div class="card" style="background:var(--danger-bg);border-color:transparent;margin-bottom:12px">Esta clase está cancelada.</div>' : ''}
-    ${ct.hidden ? '<div class="card small" style="background:var(--surface-2);border-color:transparent;margin-bottom:12px">🙈 Todo el tipo de clase está oculto a los clientes (se cambia en Clases › Tipos de clase).</div>' : ''}
-    <div class="row wrap" style="margin-bottom:6px">
-      <div class="field" style="margin:0;width:120px"><label>Aforo</label><input type="number" min="1" value="${s.capacity}" data-change="capacity" data-id="${s.id}"></div>
-      <div class="grow"></div>
-      <button class="btn" data-a="session-hide" data-id="${s.id}">${s.hidden ? '👁 Mostrar a clientes' : '🙈 Ocultar a clientes'}</button>
-      ${s.cancelled ? `<button class="btn" data-a="session-restore" data-id="${s.id}">Reactivar clase</button>` : !past ? `<button class="btn danger" data-a="session-cancel" data-id="${s.id}">Cancelar clase</button>` : ''}
+  const ended = sessionEnd(s) <= new Date();
+  const n = bk.length, cap = s.capacity, pct = Math.min(100, Math.round(n / Math.max(1, cap) * 100));
+  const fromGroup = bk.filter(b => b.source === 'group').length;
+  const attendedN = bk.filter(b => attendStatus(b) === 'attended').length, noshowN = bk.filter(b => b.status === 'noshow').length;
+  const statusTag = s.cancelled ? '<span class="sx-tag danger">Cancelada</span>' : ended ? '<span class="sx-tag">Terminada</span>' : past ? '<span class="sx-tag live">En curso</span>' : isVisibleToClients(s) ? '<span class="sx-tag ok">👁 Visible para socios</span>' : '<span class="sx-tag">🔒 Aún no la ven los socios</span>';
+  const memberRow = b => {
+    const u = getUser(b.userId), p = getPlan(u.planId), st = attendStatus(b);
+    const tags = [b.source === 'group' ? '<span class="mtag group">Grupo fijo</span>' : '<span class="mtag">Extra</span>',
+      u.paymentDue ? '<span class="mtag warn">💶 Cuota</span>' : '', u.blocked ? '<span class="mtag danger">🔒 Bloqueado</span>' : ''].join('');
+    return `<div class="sx-member ${st === 'noshow' ? 'noshow' : ''}">
+      <div class="avatar">${initials(u.name)}</div>
+      <div class="grow"><div class="sx-name">${esc(u.name)}</div>
+        <div class="sx-meta">${tags}<span class="muted small">${esc(p?.name || 'Sin tarifa')}${u.phone ? ' · ' + esc(u.phone) : ''}</span></div></div>
+      ${past ? `<div class="att-toggle" role="group" aria-label="Asistencia">
+          <button class="att yes ${st === 'attended' || (!ended && st === 'booked') ? 'on' : ''}" data-a="attend" data-id="${b.id}" data-s="attended">✓ Asistió</button>
+          <button class="att no ${st === 'noshow' ? 'on' : ''}" data-a="attend" data-id="${b.id}" data-s="noshow">✗ No vino</button></div>`
+        : `<button class="btn sm quitar" data-a="admin-unbook" data-id="${b.id}" title="Quitar de la clase">${icon('x', 'width="15" height="15"')} Quitar</button>`}
+    </div>`;
+  };
+  openModal(`
+    <div class="sx-head" style="--c:${sessionColor(s)}">
+      <div class="sx-time"><b>${s.time}</b><span>${s.duration} min</span></div>
+      <div class="grow"><h2>${esc(ct.name)}</h2><div class="sx-sub">${fmtDateLong(s.date)} · ${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div><div style="margin-top:6px">${statusTag}${s.hidden ? '<span class="sx-tag">🙈 Oculta</span>' : ''}</div></div>
+      <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
     </div>
-    <div class="section-h">Apuntados (${bk.length}/${s.capacity})</div>
-    <div class="card list">${bk.length ? bk.map(b => { const u = getUser(b.userId); return `<div class="list-item">
-      <div class="avatar">${initials(u.name)}</div><div class="grow ellipsis">${esc(u.name)}</div>
-      <button class="btn sm ${b.status === 'attended' ? 'ok' : ''}" data-a="attend" data-id="${b.id}" data-s="attended" title="Asistió">✓</button>
-      <button class="btn sm ${b.status === 'noshow' ? 'danger' : ''}" data-a="attend" data-id="${b.id}" data-s="noshow" title="No vino">✗</button>
-      ${!past ? `<button class="btn sm ghost" data-a="admin-unbook" data-id="${b.id}" title="Quitar de la clase">${icon('x', 'width="16" height="16"')}</button>` : ''}
-    </div>`; }).join('') : '<div class="empty">Nadie apuntado todavía.</div>'}</div>
-    ${wl.length ? `<div class="section-h">Lista de espera (${wl.length}) · por orden de llegada</div><div class="card list">${wl.map((b, i) => `<div class="list-item"><div class="avatar">${i + 1}</div><div class="grow">${esc(getUser(b.userId).name)}</div>
-      <button class="btn sm ghost" data-a="admin-unbook" data-id="${b.id}">${icon('x', 'width="16" height="16"')}</button></div>`).join('')}</div>` : ''}
-    ${!s.cancelled && !past ? `<div class="section-h">Apuntar a un cliente</div>
-    <select class="search" id="add-client-sel"><option value="">Elige cliente…</option>${free.map(c => `<option value="${c.id}">${esc(c.name)}${c.blocked ? ' (bloqueado)' : ''}</option>`).join('')}</select>
-    ${notifyChecks()}
-    <div class="row wrap"><button class="btn primary" data-a="admin-book" data-id="${s.id}" data-m="auto">Apuntar a la clase</button>
-      <button class="btn" data-a="admin-book" data-id="${s.id}" data-m="waitlist">Poner en lista de espera</button></div>
-    <p class="muted small">Desde aquí puedes apuntar aunque la clase esté llena. Si tiene saldo, se le descuenta una clase del bono.</p>` : ''}`);
+    ${ct.hidden ? '<div class="card small" style="background:var(--surface-2);border-color:transparent;margin:12px 0 0">🙈 Todo el tipo de clase está oculto a los clientes (se cambia en Clases › Tipos de clase).</div>' : ''}
+    <div class="sx-stats">
+      <div><b>${n}<small>/${cap}</small></b><span>Apuntados</span></div>
+      <div><b class="${cap - n <= 0 ? 'danger' : cap - n <= 2 ? 'warn' : 'ok'}">${Math.max(0, cap - n)}</b><span>Plazas libres</span></div>
+      <div><b class="${wl.length ? 'warn' : ''}">${wl.length}</b><span>En espera</span></div>
+      <div><b>${fromGroup}</b><span>De grupo fijo</span></div>
+      ${past ? `<div><b class="ok">${attendedN}</b><span>Asistieron</span></div><div><b class="${noshowN ? 'danger' : ''}">${noshowN}</b><span>Faltaron</span></div>` : ''}
+    </div>
+    <div class="sx-bar"><i class="${n >= cap ? 'full' : ''}" style="width:${pct}%;--c:${sessionColor(s)}"></i></div>
+    <div class="sx-cols">
+      <div>
+        <div class="section-h">Apuntados (${n})${past ? ' · <span style="text-transform:none;letter-spacing:0">si no marcas nada, cuenta como que asistió</span>' : ''}</div>
+        <div class="card list sx-list">${n ? bk.map(memberRow).join('') : '<div class="empty">Nadie apuntado todavía.</div>'}</div>
+        ${wl.length ? `<div class="section-h">Lista de espera (${wl.length}) · por orden de llegada</div><div class="card list sx-list">${wl.map((b, i) => {
+          const u = getUser(b.userId), can = canUseFor(u, s).ok;
+          return `<div class="sx-member"><div class="avatar wl">${i + 1}</div><div class="grow"><div class="sx-name">${esc(u.name)}</div>
+            <div class="sx-meta"><span class="muted small">${can ? 'Entrará en cuanto haya plaza' : 'Espera a quitarse de otra clase'} · desde ${fmtAgo(b.createdAt)}</span></div></div>
+            <button class="btn sm quitar" data-a="admin-unbook" data-id="${b.id}">${icon('x', 'width="15" height="15"')} Quitar</button></div>`;
+        }).join('')}</div>` : ''}
+      </div>
+      <div class="sx-side">
+        ${!s.cancelled && !past ? `<div class="card">
+          <b>Apuntar a un cliente</b>
+          <select class="search" style="margin:10px 0 6px" id="add-client-sel"><option value="">Elige cliente…</option>${free.map(c => `<option value="${c.id}">${esc(c.name)}${c.blocked ? ' (bloqueado)' : ''}</option>`).join('')}</select>
+          <div class="small">${notifyChecks()}</div>
+          <div class="stack" style="gap:8px"><button class="btn primary block" data-a="admin-book" data-id="${s.id}" data-m="auto">Apuntar a la clase</button>
+            <button class="btn btn-wait block" data-a="admin-book" data-id="${s.id}" data-m="waitlist">Poner en lista de espera</button></div>
+          <p class="muted small" style="margin:8px 0 0">Puedes apuntar aunque esté llena.</p></div>` : ''}
+        <div class="card">
+          <b>Ajustes de esta clase</b>
+          <div class="row" style="margin-top:10px"><label class="muted small grow">Aforo</label><input type="number" min="1" class="search" style="margin:0;width:90px" value="${s.capacity}" data-change="capacity" data-id="${s.id}"></div>
+          <div class="stack" style="gap:8px;margin-top:10px">
+            <button class="btn block" data-a="session-hide" data-id="${s.id}">${s.hidden ? '👁 Mostrar a los socios' : '🙈 Ocultar a los socios'}</button>
+            ${s.cancelled ? `<button class="btn block" data-a="session-restore" data-id="${s.id}">Reactivar clase</button>` : !past ? `<button class="btn danger block" data-a="session-cancel" data-id="${s.id}">Cancelar clase</button>` : ''}
+          </div>
+        </div>
+      </div>
+    </div>`, 'wide');
 }
 
 function openRemoveConfirm(bookingId) {
@@ -773,7 +812,7 @@ function openClient(id) {
   const next = all.filter(x => sessionStart(x.s) > now).sort((a, b) => sessionStart(a.s) - sessionStart(b.s));
   const hist = all.filter(x => sessionStart(x.s) <= now).sort((a, b) => sessionStart(b.s) - sessionStart(a.s)).slice(0, 10);
   const lim = weeklyLimitFor(c);
-  const attended = db.bookings.filter(b => b.userId === id && b.status === 'attended').length;
+  const attended = db.bookings.filter(b => b.userId === id && attendStatus(b) === 'attended').length;
   const noshow = db.bookings.filter(b => b.userId === id && b.status === 'noshow').length;
   openModal(`${modalHead(esc(c.name))}
     <p class="muted" style="margin-top:-8px">${esc(c.email)}${c.phone ? ' · ' + esc(c.phone) : ''}</p>
@@ -838,7 +877,7 @@ function openClient(id) {
     <div class="section-h">Historial</div>
     <div class="card list">${hist.length ? hist.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
       <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
-      <span class="pill">${{ booked: 'Reservada', waitlist: 'En espera', attended: 'Asistió', noshow: 'Faltó' }[b.status]}</span></div>`).join('') : '<div class="empty">Sin reservas.</div>'}</div>
+      <span class="pill ${attendStatus(b) === 'attended' ? 'ok' : b.status === 'noshow' ? 'danger' : ''}">${{ booked: 'Reservada', waitlist: 'En espera', attended: '✓ Asistió', noshow: '✗ No vino' }[attendStatus(b)]}</span></div>`).join('') : '<div class="empty">Sin reservas.</div>'}</div>
     <div class="modal-actions">
       <button class="btn" data-a="client-toggle" data-id="${c.id}">${c.active ? 'Desactivar cuenta' : 'Activar cuenta'}</button>
       <button class="btn primary" data-a="client-edit" data-id="${c.id}">Editar datos</button></div>`);
@@ -1144,7 +1183,7 @@ const actions = {
   'session-cancel-ok': d => { cancelSession(d.id, $('#cancel-reason')?.value.trim()); toast('Clase cancelada y clientes avisados', 'ok'); openSession(d.id); render(); },
   'session-restore': d => { restoreSession(d.id); openSession(d.id); render(); },
   'session-hide': d => { toggleSessionHidden(d.id); toast(getSession(d.id).hidden ? 'Clase oculta a los clientes' : 'Clase visible para los clientes'); openSession(d.id); render(); },
-  attend: d => { const b = getBooking(d.id); setAttendance(d.id, b.status === d.s ? 'booked' : d.s); openSession(b.sessionId); render(); },
+  attend: d => { const b = getBooking(d.id); setAttendance(d.id, d.s); openSession(b.sessionId); render(); },
   'admin-unbook': d => openRemoveConfirm(d.id),
   'admin-unbook-ok': d => {
     const b = getBooking(d.id);
