@@ -32,6 +32,7 @@ const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   out: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  euro: '<path d="M17.5 6.5A7 7 0 1 0 17.5 17.5M4 10.5h9M4 13.5h9"/>',
 };
 const icon = (name, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${extra}>${ICONS[name]}</svg>`;
 
@@ -102,12 +103,12 @@ function render() {
   const unread = notificationsFor(u.id).filter(n => !n.read).length;
   if (u.role === 'client') announceNewNotifications(u.id, unread);
   const nav = u.role === 'admin'
-    ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
+    ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-pay', 'euro', 'Pagos'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
     : [['c-book', 'cal', 'Reservar'], ['c-mine', 'check', 'Mis clases'], ['c-board', 'board', 'Tablón'], ['c-profile', 'user', 'Perfil']];
   const views = {
     'c-book': viewClientBook, 'c-mine': viewClientMine, 'c-board': viewBoard, 'c-profile': viewProfile,
     'a-today': viewAdminToday, 'a-agenda': viewAdminAgenda, 'a-clients': viewAdminClients, 'a-schedule': viewAdminSchedule,
-    'a-board': viewBoard, 'a-settings': viewAdminSettings,
+    'a-board': viewBoard, 'a-settings': viewAdminSettings, 'a-pay': () => viewAdminPayments(),
   };
   $('#app').innerHTML = `
     <div class="shell ${u.role}">
@@ -1304,7 +1305,7 @@ const actions = {
       <div class="modal-actions"><button class="btn" data-a="client-open" data-id="${c.id}">Volver</button><button class="btn primary" data-a="pay-due-ok" data-id="${c.id}">Marcar cuota pendiente</button></div>`);
   },
   'pay-due-ok': d => { markPaymentDue(d.id, readNotify()); toast('Aviso de cuota enviado', 'ok'); openClient(d.id); render(); },
-  'pay-paid': d => { markPaid(d.id); toast('Cuota marcada como pagada', 'ok'); openClient(d.id); render(); },
+  'pay-paid': d => openPaymentModal(d.id, monthKey()),
   'bulk-paydue': () => openModal(`${modalHead('Cuota pendiente')}
       <p>Se marcará la cuota de ${monthName()} como pendiente a <b>${state.sel.size}</b> cliente(s). Verán un aviso en la app para decir si siguen o se dan de baja.</p>
       ${notifyChecks(false, true)}

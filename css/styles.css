@@ -303,6 +303,28 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .ph-card { border-color: #D9CBEE; background: color-mix(in srgb, #EEE7F8 40%, var(--surface)); }
 .ph-btn { background: #6D4C9F; border-color: #6D4C9F; color: #fff; font-weight: 700; }
 .ph-btn:hover { background: #5C3E8A; filter: none; }
+/* Pagos */
+.month-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; padding: 8px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
+.month-nav > div { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 4px; font-family: Poppins, sans-serif; font-size: 18px; }
+.month-nav .btn.ghost { font-size: 22px; min-width: 44px; }
+.pay-methods { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
+.pay-method { padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
+.pay-row { flex-wrap: wrap; }
+.pay-row .grow { min-width: 150px; }
+.pay-pill { border: 0; cursor: pointer; padding: 7px 12px; border-radius: 99px; font: inherit; font-size: 13px; }
+.pay-pill.paid { background: #E3F3E9; color: #1F7A45; }
+.pay-pill.absent { background: #EEE7F8; color: #6D4C9F; font-weight: 600; }
+.pay-total { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; margin: 0 0 12px; border-radius: 12px; background: var(--surface-2); }
+.pay-total b { font-family: Poppins, sans-serif; font-size: 22px; color: #1F7A45; }
+.year-chart { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; align-items: end; padding: 14px 10px 10px; }
+.yc-col { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 0; padding: 4px 0; border-radius: 8px; cursor: pointer; font: inherit; color: var(--text); }
+.yc-col.on { background: var(--surface-2); }
+.yc-bar { width: 70%; max-width: 28px; height: 90px; display: flex; align-items: flex-end; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.yc-bar i { display: block; width: 100%; background: #2F5D8A; border-radius: 6px 6px 0 0; }
+.yc-col.on .yc-bar i { background: #1F7A45; }
+.yc-v { font-size: 10px; color: var(--muted); min-height: 13px; white-space: nowrap; }
+.yc-m { font-size: 11px; font-weight: 600; text-transform: capitalize; }
+@media (max-width: 520px) { .yc-v { display: none; } }
 /* «No avisar cuando apunto yo» */
 .silent-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin: 4px 0 10px;
   border-radius: 12px; background: #EEE7F8; color: #4A2F75; font-size: 13px; }

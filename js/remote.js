@@ -31,7 +31,8 @@
     plans: { db: 'plans', cols: { id: null, name: '', type: 'weekly', per_week: null, credits: null, duration_days: 30, price: 0 } },
     classTypes: { db: 'class_types', cols: { id: null, name: '', color: '#2F5D8A', coach: '', capacity: 20, duration: 60, description: '', hidden: false } },
     schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null } },
-    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false } },
+    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false } },
+    payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
     sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false } },
     bookings: { db: 'bookings', cols: { id: null, session_id: null, user_id: null, status: 'booked', source: null, created_at: NOW, reminded: false, block_removed: false, group_removed: false } },
@@ -39,8 +40,8 @@
     notifications: { db: 'notifications', cols: { id: null, user_id: null, text: '', type: 'info', date: NOW, read: false } },
     emails: { db: 'emails', cols: { id: null, user_id: null, to_email: '', subject: '', body: '', date: NOW, sent_at: null, error: null } },
   };
-  const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects'];
-  const TS = new Set(['bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at']);
+  const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments'];
+  const TS = new Set(['bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
   const toCamel = s => s === 'to_email' ? 'to' : s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
   const toJS = (t, row) => {
     const o = {};
@@ -54,7 +55,9 @@
     for (const [col, def] of Object.entries(TABLES[t].cols)) {
       let v = o[toCamel(col)];
       if (v === undefined) v = typeof def === 'function' ? def() : def;
-      if (col === 'price' || col === 'capacity' || col === 'duration' || col === 'visible_days') v = (v === null || v === '') ? null : Number(v);
+      if (col === 'price' || col === 'capacity' || col === 'duration' || col === 'visible_days' || col === 'fee') v = (v === null || v === '' || v === undefined) ? null : Number(v);
+      if (col === 'base' || col === 'total') v = Number(v) || 0;
+      if (col === 'paid_at' && v === '') v = null;
       if ((col === 'start_date' || col === 'end_date') && v === '') v = null;
       r[col] = v;
     }
@@ -80,7 +83,7 @@
   }
   async function loadAdmin() {
     const from = dateKey(addDays(new Date(), -60));
-    const [settings, plans, cts, sched, members, sessions, bookings, anns, notifs, emails, prospects] = await Promise.all([
+    const [settings, plans, cts, sched, members, sessions, bookings, anns, notifs, emails, prospects, payments] = await Promise.all([
       loadSettings(),
       fetchAll(() => sb.from('plans').select('*').order('id')),
       fetchAll(() => sb.from('class_types').select('*').order('id')),
@@ -92,9 +95,10 @@
       fetchAll(() => sb.from('notifications').select('*').gte('date', addDays(new Date(), -60).toISOString()).order('id')),
       fetchAll(() => sb.from('emails').select('*').gte('date', addDays(new Date(), -30).toISOString()).order('id')),
       fetchAll(() => sb.from('prospects').select('*').order('id')),
+      fetchAll(() => sb.from('payments').select('*').order('id')),
     ]);
     bookings.forEach(b => delete b.sessions);
-    const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects };
+    const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects, payments };
     applyLoaded(settings, raw);
   }
   async function loadClient() {
@@ -113,7 +117,7 @@
     ]);
     const sesIds = new Set(sessions.map(s => s.id));
     const bookings = mine.filter(b => sesIds.has(b.session_id)).map(b => ({ ...b, wait_position: b.wait_position }));
-    applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [] });
+    applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [] });
     const st = Object.fromEntries(stats.map(x => [x.session_id, { booked: x.booked, waitlist: x.waitlist }]));
     db.sessions.forEach(s => s.stats = st[s.id] || { booked: 0, waitlist: 0 });
   }

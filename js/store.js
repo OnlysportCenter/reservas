@@ -39,7 +39,7 @@ function runMonthlyDue() {
   if (!db.autoDueMonth) { db.autoDueMonth = mk; saveDB(); return; }
   if (db.autoDueMonth === mk) return;
   db.autoDueMonth = mk;
-  clients().filter(c => c.active && !c.isPlaceholder && c.planId && (c.paymentMonth || '') !== mk)
+  clients().filter(c => c.active && !c.isPlaceholder && c.planId && (c.paymentMonth || '') !== mk && !paymentOf(c.id, mk))
     .forEach(c => markPaymentDue(c.id, { email: !!s.autoMonthlyEmail, app: true }));
   saveDB();
 }
@@ -59,6 +59,7 @@ function migrate() {
   db.users.forEach(u => { if (!u.weekExtras) { u.weekExtras = {}; changed = true; } });
   db.users.forEach(u => { if (u.paymentDue === undefined) { u.paymentDue = false; u.paymentAnswer = null; changed = true; } });
   if (!db.prospects) { db.prospects = []; changed = true; }
+  if (!db.payments) { db.payments = []; changed = true; }
   db.users.forEach(u => { if (u.planExpires) { u.planExpires = null; changed = true; } });   // ya no hay caducidad
   db.plans.forEach(p => { if (!p.type) { p.type = 'bono'; p.perWeek = null; changed = true; } });
   if (!db.plans.some(p => p.type === 'weekly')) {
@@ -733,11 +734,66 @@ function markPaymentDue(userId, { email = false, app = true } = {}) {
   if (email) sendEmail(userId, `Cuota de ${monthName(u.paymentMonth)} pendiente`, `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\nSi ya la has pagado, ignora este mensaje.\n\n${db.settings.centerName}`);
   saveDB();
 }
-function markPaid(userId) {
-  const u = getUser(userId);
-  u.paymentDue = false; u.paymentAnswer = null; u.paymentAnsweredAt = null;
+// Marcar como pagada la cuota del mes en curso (con los datos habituales si no se dan otros)
+function markPaid(userId, data = {}) {
+  recordPayment(userId, monthKey(), data);
+}
+
+// ---------- Pagos (cuotas mensuales) ----------
+const PAY_METHODS = ['Efectivo', 'Bizum', 'Tarjeta', 'Transferencia'];
+const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
+const IVA_RATE = 0.21;
+const withIva = (base, iva) => round2(iva ? base * (1 + IVA_RATE) : base);
+// Cuota habitual del socio: la suya propia o, si no tiene, el precio de su tarifa
+function feeOf(u) {
+  if (u.fee != null && u.fee !== '') return { base: Number(u.fee), iva: !!u.feeIva };
+  return { base: Number(getPlan(u.planId)?.price) || 0, iva: !!u.feeIva };
+}
+const paymentOf = (userId, month) => db.payments.find(p => p.userId === userId && p.month === month);
+const paymentsIn = month => db.payments.filter(p => p.month === month);
+// Registra (o corrige) el pago de un mes. Si es el mes en curso o uno futuro, le quita el aviso de cuota pendiente.
+function recordPayment(userId, month, { paidAt, method, base, iva, note, status = 'paid', saveFee = false, noSave = false } = {}) {
+  const u = getUser(userId), def = feeOf(u);
+  const b = base == null || base === '' ? def.base : round2(base);
+  const i = iva == null ? def.iva : !!iva;
+  let p = paymentOf(userId, month);
+  if (!p) { p = { id: uid(), userId, month, createdAt: new Date().toISOString() }; db.payments.push(p); }
+  Object.assign(p, status === 'absent'
+    ? { status: 'absent', paidAt: null, method: '', base: 0, iva: false, total: 0, note: note || '' }
+    : { status: 'paid', paidAt: paidAt || dateKey(new Date()), method: method || p.method || 'Efectivo', base: b, iva: i, total: withIva(b, i), note: note ?? p.note ?? '' });
+  if (saveFee && status !== 'absent') { u.fee = b; u.feeIva = i; }
+  if (month >= monthKey()) {
+    if (u.paymentDue && (u.paymentMonth || monthKey()) <= month) { u.paymentDue = false; u.paymentAnswer = null; u.paymentAnsweredAt = null; }
+    if ((u.paymentMonth || '') < month) u.paymentMonth = month;   // para que no se le vuelva a marcar ese mes
+  }
+  if (!noSave) saveDB();
+  return p;
+}
+// Deshacer un pago. Si era del mes en curso, vuelve a quedar con la cuota pendiente (sin avisarle).
+function undoPayment(paymentId) {
+  const p = db.payments.find(x => x.id === paymentId); if (!p) return;
+  db.payments = db.payments.filter(x => x.id !== paymentId);
+  const u = getUser(p.userId);
+  if (u && p.month === monthKey() && p.status === 'paid') { u.paymentDue = true; u.paymentMonth = p.month; u.paymentAnswer = null; u.paymentAnsweredAt = null; }
   saveDB();
 }
+// Socios que deberían pagar ese mes (activos, con tarifa o cuota, sin contar comodines)
+const payersFor = month => realClients().filter(c => (c.active || paymentOf(c.id, month)) && (c.planId || c.fee != null || paymentOf(c.id, month)));
+function monthSummary(month) {
+  const ps = paymentsIn(month).filter(p => p.status === 'paid');
+  const byMethod = {};
+  ps.forEach(p => { byMethod[p.method] = round2((byMethod[p.method] || 0) + p.total); });
+  const payers = payersFor(month);
+  const absent = paymentsIn(month).filter(p => p.status === 'absent').length;
+  const paidN = payers.filter(c => paymentOf(c.id, month)?.status === 'paid').length;
+  const pending = payers.filter(c => !paymentOf(c.id, month));
+  return {
+    total: round2(ps.reduce((a, p) => a + p.total, 0)), base: round2(ps.reduce((a, p) => a + p.base, 0)),
+    ivaTotal: round2(ps.reduce((a, p) => a + (p.total - p.base), 0)), byMethod, paidN, absent, pending,
+    expected: round2(pending.reduce((a, c) => { const f = feeOf(c); return a + withIva(f.base, f.iva); }, 0)), payers: payers.length,
+  };
+}
+const shiftMonth = (mk, n) => { const [y, m] = mk.split('-').map(Number); return monthKey(new Date(y, m - 1 + n, 1)); };
 // El cliente responde: 'stay' (sigo) | 'leave' (me doy de baja). Con servidor lo sustituye remote.js.
 function answerPayment(userId, answer) {
   const u = getUser(userId);
