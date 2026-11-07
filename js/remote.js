@@ -22,7 +22,17 @@
   let snapshot = {};        // última versión guardada en el servidor de cada fila (para saber qué ha cambiado)
   let settingsSnap = '';
   let queue = Promise.resolve();
-  const enqueue = fn => (queue = queue.then(fn).catch(e => { console.error(e); toast('Error de conexión: ' + (e.message || e), 'err'); }));
+  const enqueue = fn => (queue = queue.then(fn).catch(e => { console.error(e); toast('Error de conexión: ' + (e.message || e), 'err'); showSaveError(e); }));
+  // Si un guardado falla, se avisa de forma fija: lo que se ve en pantalla puede no estar guardado
+  function showSaveError(e) {
+    if (role !== 'admin' || document.getElementById('save-error')) return;
+    const el = document.createElement('div');
+    el.id = 'save-error';
+    el.className = 'save-error';
+    el.innerHTML = `<div><b>⚠️ No se han podido guardar los últimos cambios.</b><div class="small">Recarga la página: verás lo que de verdad está guardado. (${esc(e.message || e)})</div></div>
+      <button class="btn sm" onclick="location.reload()">Recargar</button>`;
+    document.body.appendChild(el);
+  }
 
   // ---------- Columnas de cada tabla (y valor por defecto si falta) ----------
   const TODAY = () => dateKey(new Date());
@@ -31,7 +41,7 @@
     plans: { db: 'plans', cols: { id: null, name: '', type: 'weekly', per_week: null, credits: null, duration_days: 30, price: 0 } },
     classTypes: { db: 'class_types', cols: { id: null, name: '', color: '#2F5D8A', coach: '', capacity: 20, duration: 60, description: '', hidden: false } },
     schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null } },
-    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false } },
+    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '' } },
     payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', created_at: NOW } },
     cashMoves: { db: 'cash_moves', cols: { id: null, date: null, concept: '', method: 'Efectivo', base: 0, iva: false, amount: 0, created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },

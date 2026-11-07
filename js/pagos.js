@@ -140,7 +140,10 @@ function openGestionImport() {
     </label>
     <div class="card small" style="margin-top:12px">Se traen <b>los pagos de todos los meses</b>, los meses marcados como «no viene», la <b>cuota de cada socio</b> y los <b>movimientos de caja</b> (ventas y gastos).
       Los socios se emparejan con los de esta app por correo, teléfono o nombre; los que no encuentre te los enseño antes de importar.
-      Puedes importar varias veces: lo que ya esté se actualiza, no se duplica.</div>`);
+      Puedes importar varias veces: lo que ya esté se actualiza, no se duplica.</div>
+    ${(() => { const c = gestionImportedCounts(); return c.pays || c.moves || c.users ? `<div class="card small row between wrap" style="margin-top:12px;gap:10px">
+      <span>Ya hay importado: <b>${c.pays}</b> pagos/meses, <b>${c.moves}</b> movimientos de caja y <b>${c.users}</b> clientes creados por la importación.</span>
+      <button class="btn sm danger" data-a="gest-undo">↩️ Deshacer la importación</button></div>` : ''; })()}`);
 }
 document.addEventListener('change', async e => {
   if (e.target.id !== 'gest-file' || !e.target.files[0]) return;
@@ -161,9 +164,14 @@ function prepareGestionImport(data) {
     const id = k.slice(0, k.lastIndexOf('_'));
     if (p && (p.pagado || p.ausente)) count[id] = (count[id] || 0) + 1;
   }));
+  // Empareja primero por nombre (lo más fiable si hay familias que comparten correo o teléfono),
+  // luego por correo y por teléfono. Un cliente de esta app solo puede recibir a un socio de la copia.
+  const taken = new Set();
+  const free = id => id && !taken.has(id) ? id : null;
   const rows = data.members.map(gm => {
     const full = norm2([gm.nombre, gm.apellidos].filter(Boolean).join(' ')).replace(/\s+/g, ' ').trim();
-    const match = (gm.email && byEmail.get(gm.email.toLowerCase().trim())) || (digits9(gm.telefono).length === 9 && byPhone.get(digits9(gm.telefono))) || byName.get(full) || null;
+    const match = free(byName.get(full)) || (gm.email && free(byEmail.get(gm.email.toLowerCase().trim()))) || (digits9(gm.telefono).length === 9 && free(byPhone.get(digits9(gm.telefono)))) || null;
+    if (match) taken.add(match);
     return { gm, match, n: count[gm.id] || 0, how: match ? 'auto' : '' };
   }).filter(r => r.n || r.gm.activo !== false);
   let nMoves = 0;
@@ -201,11 +209,18 @@ function runGestionImport() {
   document.querySelectorAll('[data-gest]').forEach(sel => { const r = rows.find(x => x.gm.id === sel.dataset.gest); if (r) r.choice = sel.value; });
   const target = new Map();
   let created = 0, pays = 0, skipped = 0;
+  // correos ya usados (en el servidor no puede haber dos personas con el mismo correo)
+  const usedEmails = new Set(db.users.map(u => (u.email || '').toLowerCase().trim()).filter(Boolean));
+  const noEmail = [];
   rows.forEach(r => {
     let id = r.how === 'auto' ? r.match : r.choice === '__skip' ? null : r.choice === '__new' ? '' : r.choice;
     if (id === '') {
       id = uid(); created++;
-      db.users.push({ id, role: 'client', name: [r.gm.nombre, r.gm.apellidos].filter(Boolean).join(' ').trim() || 'Sin nombre', email: (r.gm.email || '').trim(), phone: (r.gm.telefono || '').trim(),
+      const name = [r.gm.nombre, r.gm.apellidos].filter(Boolean).join(' ').trim() || 'Sin nombre';
+      let email = (r.gm.email || '').trim();
+      if (email && usedEmails.has(email.toLowerCase())) { noEmail.push(name); email = ''; }   // correo repetido: se crea sin correo
+      if (email) usedEmails.add(email.toLowerCase());
+      db.users.push({ id, role: 'client', name, email, phone: (r.gm.telefono || '').trim(), importSource: 'gestion',
         active: r.gm.activo !== false, blocked: false, blockedReason: '', weeklyLimit: null, planId: null, credits: null, planExpires: null, weekExtras: {}, imported: true, createdAt: dateKey(new Date()) });
     }
     if (!id) { skipped++; return; }
@@ -242,6 +257,28 @@ function runGestionImport() {
   closeModal();
   toast(`Importado: ${pays} pagos/meses${moves ? ` · ${moves} movimientos de caja` : ''}${created ? ` · ${created} clientes nuevos` : ''}${skipped ? ` · ${skipped} sin importar` : ''}`, 'ok');
   render();
+  if (noEmail.length) openModal(`${modalHead('Importación hecha')}
+    <p>Estos <b>${noEmail.length}</b> clientes nuevos tenían un correo que ya usa otra persona (por ejemplo, familiares con el mismo correo), así que se han creado <b>sin correo</b>:</p>
+    <div class="card list small" style="max-height:40vh;overflow:auto">${noEmail.map(n => `<div class="list-item">${esc(n)}</div>`).join('')}</div>
+    <p class="muted small">Sus pagos se han importado igual. Si quieres que entren en la app, ponles su propio correo desde Clientes.</p>
+    <div class="modal-actions"><button class="btn primary" data-a="close">Entendido</button></div>`);
+}
+
+// Deshacer la importación: borra los pagos y movimientos de caja importados y los clientes que creó la importación
+function gestionImportedCounts() {
+  return {
+    pays: db.payments.filter(p => p.note === 'Importado de gestión').length,
+    moves: db.cashMoves.filter(m => String(m.id).startsWith('g-')).length,
+    users: db.users.filter(u => u.importSource === 'gestion' && !db.bookings.some(b => b.userId === u.id)).length,
+  };
+}
+function undoGestionImport() {
+  const ids = new Set(db.users.filter(u => u.importSource === 'gestion' && !db.bookings.some(b => b.userId === u.id)).map(u => u.id));
+  db.payments = db.payments.filter(p => p.note !== 'Importado de gestión' && !ids.has(p.userId));
+  db.cashMoves = db.cashMoves.filter(m => !String(m.id).startsWith('g-'));
+  db.users = db.users.filter(u => !ids.has(u.id));
+  db.schedule.forEach(t => { if ((t.members || []).some(id => ids.has(id))) t.members = t.members.filter(id => !ids.has(id)); });
+  saveDB();
 }
 
 // ============================================================
@@ -426,6 +463,10 @@ Object.assign(actions, {
   'pay-export': d => exportPaymentsMonth(d.m || state.payMonth || monthKey()),
   'pay-import': () => openGestionImport(),
   'gest-run': () => runGestionImport(),
+  'gest-undo': () => { const c = gestionImportedCounts(); confirmModal('Deshacer la importación',
+    `Se borrarán ${c.pays} pagos/meses importados, ${c.moves} movimientos de caja importados y ${c.users} clientes que creó la importación. Lo que hayas apuntado tú a mano en esta app no se toca. No se puede deshacer.`,
+    'data-a="gest-undo-ok"', 'Borrar lo importado'); },
+  'gest-undo-ok': () => { undoGestionImport(); closeModal(); toast('Importación deshecha', 'ok'); render(); },
 });
 Object.assign(forms, {
   payment: (f, form) => {

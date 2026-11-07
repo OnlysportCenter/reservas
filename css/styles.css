@@ -303,6 +303,10 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .ph-card { border-color: #D9CBEE; background: color-mix(in srgb, #EEE7F8 40%, var(--surface)); }
 .ph-btn { background: #6D4C9F; border-color: #6D4C9F; color: #fff; font-weight: 700; }
 .ph-btn:hover { background: #5C3E8A; filter: none; }
+.save-error { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 9999; width: min(560px, calc(100% - 32px));
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: #C0392B; color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.save-error > div { flex: 1; }
+.save-error .btn { background: #fff; color: #C0392B; border-color: #fff; font-weight: 700; }
 /* Pagos */
 .month-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 14px; padding: 8px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
 .month-nav > div { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 4px; font-family: Poppins, sans-serif; font-size: 18px; }
