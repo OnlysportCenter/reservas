@@ -226,6 +226,7 @@ function renderImportInner() {
   if (!imp.rows.length) {
     openModal(`${modalHead('Importar clientes')}
       <p>Sube la lista de clientes que ya tienes: <b>Excel (.xlsx)</b>, <b>CSV</b> o <b>JSON</b>. Sirve el archivo que exportes desde Bookyway u otra aplicación.</p>
+      ${(db.settings.importLog || []).length || importDays().length ? `<div class="card small row between wrap" style="gap:10px;margin-bottom:12px"><span>¿Te has equivocado de archivo?</span><button class="btn sm danger" data-a="imp-undo-list">↩️ Deshacer una importación</button></div>` : ''}
       <label class="dropzone" id="imp-drop">
         <input type="file" id="imp-file" accept=".csv,.json,.xlsx,.xls,.txt" hidden>
         <div style="font-size:28px">📄</div><b>Pulsa para elegir el archivo</b><div class="muted small">o arrástralo aquí</div>
@@ -323,9 +324,12 @@ function autoPlanMap() {
 function runImport() {
   const parsed = imp.rows.map(rowToClient).filter(p => p.status === 'new' || p.status === 'update');
   const res = { created: 0, updated: 0, groups: 0, reserved: 0 };
+  // registro para poder deshacer esta importación
+  const log = { id: uid(), at: new Date().toISOString(), file: imp.fileName, created: [], updated: [], groupAdds: [] };
   parsed.forEach(p => {
     let u = p.existing;
     if (u) {
+      log.updated.push({ id: u.id, before: { name: u.name, phone: u.phone, emailInvalid: !!u.emailInvalid, blocked: !!u.blocked, blockedReason: u.blockedReason || '', planId: u.planId ?? null, credits: u.credits ?? null, planExpires: u.planExpires ?? null } });
       u.name = p.name || u.name;
       if (p.phone) u.phone = p.phone;
       res.updated++;
@@ -333,6 +337,7 @@ function runImport() {
       u = { id: uid(), role: 'client', active: true, blocked: false, blockedReason: '', weeklyLimit: null, weekExtras: {}, planId: null, credits: 0, planExpires: null,
         createdAt: dateKey(new Date()), name: p.name, email: p.email, phone: p.phone, imported: true };
       db.users.push(u);
+      log.created.push(u.id);
       res.created++;
       if (imp.opts.email && p.email) sendEmail(u.id, `Bienvenid@ a ${db.settings.centerName}`, `Hola ${p.name.split(' ')[0]},\n\nYa tienes acceso a la app de reservas de ${db.settings.centerName}. Entra con este email (${p.email}) para ver tus clases, quitarte si vas a faltar o apuntarte a la lista de espera.\n\n${db.settings.centerName}`);
     }
@@ -347,10 +352,12 @@ function runImport() {
     }
     p.groups.slots.forEach(sid => {
       const t = getSlot(sid);
-      if (!t.members.includes(u.id)) { t.members.push(u.id); res.groups++; }
+      if (!t.members.includes(u.id)) { t.members.push(u.id); res.groups++; log.groupAdds.push([sid, u.id]); }
     });
     res.reserved += syncGroups(u.id);
   });
+  // se guardan las 3 últimas importaciones
+  db.settings.importLog = [log, ...(db.settings.importLog || [])].slice(0, 3);
   saveDB();
   closeModal();
   render();
@@ -363,7 +370,64 @@ function runImport() {
     </div>
     ${res.blocked ? `<p class="small">🔒 ${res.blocked} cliente(s) bloqueados por deuda.</p>` : ''}
     <p class="muted small">Revisa los grupos en Clases › Horario semanal. Si algún grupo supera el aforo, aparecerá en rojo.</p>
-    <div class="modal-actions"><button class="btn" data-a="close">Cerrar</button><button class="btn primary" data-a="nav" data-v="a-clients">Ver clientes</button></div>`);
+    <p class="muted small">¿Te has equivocado de archivo? En Clientes › ⬆️ Importar tienes «↩️ Deshacer una importación».</p>
+    <div class="modal-actions"><button class="btn danger" data-a="imp-undo" data-id="${log.id}">↩️ Deshacer esta importación</button><button class="btn" data-a="close">Cerrar</button><button class="btn primary" data-a="nav" data-v="a-clients">Ver clientes</button></div>`);
+}
+
+// ---------- Deshacer una importación de clientes ----------
+// Borra un cliente y todo lo suyo (reservas, avisos, pagos, grupos). En el servidor se borra en cascada.
+function purgeClients(ids) {
+  const set = new Set(ids);
+  db.schedule.forEach(t => { if ((t.members || []).some(id => set.has(id))) t.members = t.members.filter(id => !set.has(id)); });
+  db.bookings = db.bookings.filter(b => !set.has(b.userId));
+  db.notifications = db.notifications.filter(n => !set.has(n.userId));
+  db.emails = db.emails.filter(e => !set.has(e.userId));
+  if (db.payments) db.payments = db.payments.filter(p => !set.has(p.userId));
+  db.users = db.users.filter(u => !set.has(u.id));
+}
+function undoImportLog(logId) {
+  const log = (db.settings.importLog || []).find(l => l.id === logId);
+  if (!log) return null;
+  const affectedSessions = new Set(db.bookings.filter(b => log.created.includes(b.userId)).map(b => b.sessionId));
+  purgeClients(log.created.filter(id => getUser(id)?.role === 'client'));
+  // los clientes que ya existían vuelven a como estaban, y salen de los grupos a los que los metió la importación
+  log.updated.forEach(({ id, before }) => { const u = getUser(id); if (u) Object.assign(u, before); });
+  log.groupAdds.forEach(([sid, uid_]) => {
+    const t = getSlot(sid); if (!t || !getUser(uid_)) return;
+    t.members = t.members.filter(x => x !== uid_);
+    db.bookings.filter(b => b.userId === uid_ && b.source === 'group' && ['booked', 'waitlist'].includes(b.status) && getSession(b.sessionId)?.templateId === sid && sessionStart(getSession(b.sessionId)) > new Date())
+      .forEach(b => { b.status = 'cancelled'; b.groupRemoved = true; affectedSessions.add(b.sessionId); });
+  });
+  affectedSessions.forEach(sid => { if (getSession(sid)) promoteWaitlist(sid); });
+  db.settings.importLog = db.settings.importLog.filter(l => l.id !== logId);
+  saveDB();
+  return log;
+}
+// Importaciones hechas antes de que existiera el registro: clientes importados agrupados por día
+function importDays() {
+  const logged = new Set((db.settings.importLog || []).flatMap(l => l.created));
+  const days = {};
+  db.users.filter(u => u.role === 'client' && u.imported && u.importSource !== 'gestion' && !logged.has(u.id))
+    .forEach(u => (days[u.createdAt] = days[u.createdAt] || []).push(u));
+  return Object.entries(days).sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+}
+function openImportUndo() {
+  const logs = db.settings.importLog || [];
+  const days = importDays();
+  const when = iso => { const d = new Date(iso); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} a las ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  openModal(`${modalHead('↩️ Deshacer una importación')}
+    <p class="muted" style="margin-top:-8px">Elige la importación que quieres deshacer. Se borran los clientes que creó (con sus reservas y grupos) y los que actualizó vuelven a como estaban.</p>
+    ${logs.length ? `<div class="section-h">Últimas importaciones</div><div class="card list">${logs.map(l => `<div class="list-item" style="flex-wrap:wrap">
+      <div class="grow" style="min-width:180px"><b>📄 ${esc(l.file || 'Archivo')}</b><div class="muted small">${when(l.at)} · ${l.created.length} nuevos · ${l.updated.length} actualizados</div></div>
+      <button class="btn sm danger" data-a="imp-undo" data-id="${l.id}">Deshacer</button></div>`).join('')}</div>` : ''}
+    ${days.length ? `<div class="section-h">${logs.length ? 'Importaciones anteriores' : 'Clientes importados por día'}</div>
+      <p class="muted small" style="margin-top:-4px">De estas no se guardó el detalle: solo se pueden borrar los clientes que se crearon ese día (los que ya existían y se actualizaron no se pueden devolver a como estaban).</p>
+      <div class="card list">${days.map(([day, us]) => `<div class="list-item" style="flex-wrap:wrap">
+        <div class="grow" style="min-width:180px"><b>${day ? fmtDateShort(day) + ' ' + String(day).slice(0, 4) : 'Sin fecha'}</b> · ${us.length} clientes
+          <div class="muted small ellipsis">${us.slice(0, 4).map(u => esc(u.name)).join(', ')}${us.length > 4 ? '…' : ''}</div></div>
+        <button class="btn sm danger" data-a="imp-undo-day" data-d="${esc(day || '')}">Borrar estos ${us.length}</button></div>`).join('')}</div>` : ''}
+    ${!logs.length && !days.length ? '<div class="card empty">No hay importaciones de clientes que deshacer.</div>' : ''}
+    <div class="modal-actions"><button class="btn" data-a="import">Volver</button></div>`);
 }
 
 function downloadTemplate() {
@@ -384,6 +448,24 @@ Object.assign(actions, {
   'imp-reset': () => openImport(),
   'imp-run': () => runImport(),
   'imp-template': () => downloadTemplate(),
+  'imp-undo-list': () => openImportUndo(),
+  'imp-undo': d => {
+    const l = (db.settings.importLog || []).find(x => x.id === d.id);
+    if (!l) return toast('Esa importación ya no se puede deshacer', 'err');
+    confirmModal('Deshacer la importación', `Se borrarán ${l.created.length} clientes creados por «${esc(l.file || 'el archivo')}» (con sus reservas y grupos) y ${l.updated.length} clientes que ya existían volverán a como estaban. No se puede deshacer.`, `data-a="imp-undo-ok" data-id="${l.id}"`, 'Deshacer importación');
+  },
+  'imp-undo-ok': d => { const l = undoImportLog(d.id); closeModal(); toast(l ? `Importación deshecha: ${l.created.length} clientes borrados` : 'No se encontró', l ? 'ok' : 'err'); render(); },
+  'imp-undo-day': d => {
+    const us = importDays().find(([day]) => String(day || '') === d.d)?.[1] || [];
+    confirmModal('Borrar clientes importados', `Se borrarán los ${us.length} clientes importados el ${d.d ? fmtDateShort(d.d) : 'día sin fecha'}, con sus reservas, grupos y pagos. No se puede deshacer.`, `data-a="imp-undo-day-ok" data-d="${esc(d.d)}"`, `Borrar ${us.length} clientes`);
+  },
+  'imp-undo-day-ok': d => {
+    const us = importDays().find(([day]) => String(day || '') === d.d)?.[1] || [];
+    const sessions = new Set(db.bookings.filter(b => us.some(u => u.id === b.userId)).map(b => b.sessionId));
+    purgeClients(us.map(u => u.id));
+    sessions.forEach(sid => { if (getSession(sid)) promoteWaitlist(sid); });
+    saveDB(); closeModal(); toast(`${us.length} clientes borrados`, 'ok'); render();
+  },
 });
 document.addEventListener('change', e => {
   const t = e.target;

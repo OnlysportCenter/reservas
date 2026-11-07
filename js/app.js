@@ -820,7 +820,8 @@ function viewAdminClientsList(tabs = '') {
         <button class="btn sm" data-a="bulk-unblock" ${state.sel.size ? '' : 'disabled'}>🔓 Desbloquear</button></div>
       <div class="row wrap" style="margin-top:8px">
         <button class="btn sm" data-a="bulk-paydue" ${state.sel.size ? '' : 'disabled'}>💶 Marcar cuota pendiente</button>
-        <button class="btn sm ok" data-a="bulk-paid" ${state.sel.size ? '' : 'disabled'}>✅ Marcar como pagada</button></div>
+        <button class="btn sm ok" data-a="bulk-paid" ${state.sel.size ? '' : 'disabled'}>✅ Marcar como pagada</button>
+        <button class="btn sm danger" data-a="bulk-delete" ${state.sel.size ? '' : 'disabled'} style="margin-left:auto">🗑 Borrar ${state.sel.size || ''}</button></div>
     </div>` : ''}
     <div class="card list">${list.length ? list.map(c => {
       const p = getPlan(c.planId), ps = planStatus(c);
@@ -1318,6 +1319,24 @@ const actions = {
       ${notifyChecks(false, true)}
       <div class="modal-actions"><button class="btn" data-a="close">Volver</button><button class="btn primary" data-a="bulk-paydue-ok">Marcar cuota pendiente</button></div>`),
   'bulk-paydue-ok': () => { const nt = readNotify(); state.sel.forEach(id => markPaymentDue(id, nt)); toast(`Aviso enviado a ${state.sel.size} cliente(s)`, 'ok'); state.sel.clear(); closeModal(); render(); },
+  'bulk-delete': () => {
+    const n = state.sel.size; if (!n) return;
+    const names = [...state.sel].map(getUser).filter(Boolean).map(u => esc(u.name));
+    openModal(`${modalHead(`🗑 Borrar ${n} ${n === 1 ? 'cliente' : 'clientes'}`)}
+      <p>Se borrarán del todo, con sus <b>reservas, grupos fijos, avisos y pagos</b>. No se puede deshacer.</p>
+      <div class="card list small" style="max-height:30vh;overflow:auto">${names.slice(0, 50).map(x => `<div class="list-item">${x}</div>`).join('')}${names.length > 50 ? `<div class="list-item muted">… y ${names.length - 50} más</div>` : ''}</div>
+      <p class="muted small">Si solo quieres que no reserven, mejor «🔒 Bloquear» o «Desactivar cuenta»: así no pierdes su historial.</p>
+      <div class="field"><label>Para confirmar, escribe <b>BORRAR</b></label><input id="del-confirm" autocomplete="off"></div>
+      <div class="modal-actions"><button class="btn" data-a="close">Cancelar</button><button class="btn danger" data-a="bulk-delete-ok">Borrar ${n}</button></div>`);
+  },
+  'bulk-delete-ok': () => {
+    if (($('#del-confirm')?.value || '').trim().toUpperCase() !== 'BORRAR') return toast('Escribe BORRAR para confirmar', 'err');
+    const ids = [...state.sel].filter(id => getUser(id)?.role === 'client');
+    const sessions = new Set(db.bookings.filter(b => ids.includes(b.userId)).map(b => b.sessionId));
+    purgeClients(ids);
+    sessions.forEach(sid => { if (getSession(sid)) promoteWaitlist(sid); });
+    saveDB(); state.sel.clear(); closeModal(); toast(`${ids.length} ${ids.length === 1 ? 'cliente borrado' : 'clientes borrados'}`, 'ok'); render();
+  },
   'bulk-paid': () => { state.sel.forEach(id => markPaid(id)); toast('Cuotas marcadas como pagadas', 'ok'); state.sel.clear(); render(); },
   'select-mode': () => { state.selectMode = !state.selectMode; state.sel = new Set(); render(); },
   'sel-toggle': d => { state.sel.has(d.id) ? state.sel.delete(d.id) : state.sel.add(d.id); liveRender(); },
