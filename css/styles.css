@@ -80,6 +80,11 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .bottomnav button { min-width: 0; }
 .bottomnav button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shell.admin .bottomnav button { font-size: 9.5px; padding: 6px 0; }
+/* App de los socios: los 4 botones de abajo, un poco más grandes y fáciles de pulsar */
+.shell.client { padding-bottom: 96px; }
+.shell.client .bottomnav { padding-top: 8px; }
+.shell.client .bottomnav button { font-size: 12.5px; font-weight: 600; gap: 4px; padding: 7px 2px; }
+.shell.client .bottomnav button svg { width: 26px; height: 26px; }
 .bottomnav button.active { color: #fff; }
 .bottomnav button.active svg { color: var(--nav-accent); }
 
