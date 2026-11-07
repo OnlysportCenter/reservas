@@ -304,7 +304,22 @@ const REPS_RE = '(?:reps?|repes?|repeticiones|rep|ropes?)';
 function nameSim(a, b) {
   const clean = s => norm2(s).replace(/\b(de|del|la|el|con|en|al|a)\b/g, ' ').replace(/[^a-z0-9]/g, '');
   const x = clean(a), y = clean(b); if (!x || !y) return 0; if (x === y) return 1;
-  if (x.length >= 5 && (y.startsWith(x) || x.startsWith(y))) return 0.9;
+  // palabras abreviadas: «remo polea uni» = «Remo polea media unilateral» (cada palabra es el principio de una del nombre)
+  const tok = s => norm2(s).replace(/\b(de|del|la|el|con|en|al|a)\b/g, ' ').split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+  const ta = tok(a), tb = tok(b);
+  if (ta.length >= 2 && ta.every(w => tb.some(v => v.startsWith(w.slice(0, Math.max(3, Math.min(w.length, 5))))))) return 0.88;
+  // palabras mal escritas: «Tricoes» = «Tríceps…», «Elavcuones» = «Elevaciones…» (la primera palabra se parece mucho)
+  if (ta[0] && tb[0] && ta[0].length >= 5) {
+    const lev = (s, t) => { const d = Array.from({ length: s.length + 1 }, (_, i) => [i]); for (let j = 1; j <= t.length; j++) d[0][j] = j;
+      for (let i = 1; i <= s.length; i++) for (let j = 1; j <= t.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (s[i - 1] === t[j - 1] ? 0 : 1)); return d[s.length][t.length]; };
+    const dist = lev(ta[0], tb[0]);
+    if (dist <= Math.floor(Math.max(ta[0].length, tb[0].length) / 3)) {
+      // una sola palabra igual al principio de un nombre más largo («Sentadilla» ≠ «Sentadilla goblet»); si está mal escrita, sí
+      if (ta.length === 1 && tb.length > 1) return dist === 0 ? 0.7 : 0.75;
+      const restOk = ta.slice(1).every(w => tb.slice(1).some(v => v.startsWith(w.slice(0, 3))));
+      return restOk ? 0.8 - dist * 0.01 : 0.6;
+    }
+  }
   const bg = s => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
   const A = bg(x), B = bg(y); let inter = 0; A.forEach((n, g) => { inter += Math.min(n, B.get(g) || 0); });
   return (2 * inter) / (Math.max(1, x.length - 1) + Math.max(1, y.length - 1));
@@ -347,6 +362,8 @@ function ptParseNotes(text, cid) {
       tryRe(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*${UNIT_RE}\\s*(?:a|por|x)?\\s*(\\d+)\\s*${REPS_RE}`), r => { load = r[1]; unit = r[2]; reps = r[3]; });
       tryRe(new RegExp(`(\\d+)\\s*${REPS_RE}\\s*(?:a|con|de|x|por)?\\s*(\\d+(?:\\.\\d+)?)\\s*${UNIT_RE}`), r => { reps = r[1]; load = r[2]; unit = r[3]; });
       tryRe(new RegExp(`^(\\d+)\\s+(\\d+(?:\\.\\d+)?)\\s*${UNIT_RE}`), r => { reps = r[1]; load = r[2]; unit = r[3]; });   // «12 70 libras»
+      tryRe(new RegExp(`^(\\d+(?:\\.\\d+)?)\\s+(?:(?:por|x|a)\\s*)?(\\d+)\\s*${REPS_RE}`), r => { load = r[1]; reps = r[2]; });   // «45 por 8 reps»
+      tryRe(new RegExp(`(\\d+)\\s*${REPS_RE}\\s+(\\d+(?:\\.\\d+)?)\\s*$`), r => { reps = r[1]; load = r[2]; });   // «12 reps 7,5»
       tryRe(new RegExp(`(\\d+)\\s*${REPS_RE}`), r => { reps = r[1]; });
       tryRe(new RegExp(`(\\d+(?:\\.\\d+)?)\\s*${UNIT_RE}\\b`), r => { load = r[1]; unit = r[2]; });
       tryRe(/^(\d+)\s+(\d+(?:\.\d+)?)$/, r => { reps = r[1]; load = r[2]; });
