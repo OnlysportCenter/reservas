@@ -149,7 +149,9 @@ document.addEventListener('change', async e => {
   if (e.target.id !== 'gest-file' || !e.target.files[0]) return;
   try {
     const data = JSON.parse((await e.target.files[0].text()).replace(/^﻿/, ''));
-    if (!Array.isArray(data.members) || typeof data.pagos !== 'object') throw new Error('Este archivo no parece una copia de la app de gestión.');
+    if (!Array.isArray(data.members) && !data.cajaExtra) throw new Error('Este archivo no parece una copia de la app de gestión.');
+    data.members = Array.isArray(data.members) ? data.members : [];
+    data.pagos = data.pagos && typeof data.pagos === 'object' ? data.pagos : {};
     prepareGestionImport(data);
   } catch (err) { toast(err.message || 'No se pudo leer el archivo', 'err'); }
 });
@@ -200,7 +202,8 @@ function renderGestionPreview() {
     <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Ver los ${auto.length} emparejados automáticamente</summary>
       <div class="card list small" style="max-height:30vh;overflow:auto;margin-top:6px">${auto.map(r => `<div class="list-item"><span class="grow">${gName(r.gm)}</span><span class="muted">→ ${esc(getUser(r.match).name)}</span></div>`).join('')}</div></details>
     <label class="check small" style="margin-top:12px"><input type="checkbox" id="gest-fee" checked> Copiar también la cuota de cada socio (importe e IVA)</label>
-    ${state.gestImport.nMoves ? `<label class="check small"><input type="checkbox" id="gest-cash" checked> Traer también los ${state.gestImport.nMoves} movimientos de caja (ventas y gastos)</label>` : ''}
+    ${state.gestImport.nMoves ? `<label class="check small"><input type="checkbox" id="gest-cash" checked> Traer también los ${state.gestImport.nMoves} movimientos de caja (ventas y gastos)</label>`
+      : `<div class="card small" style="background:var(--warn-bg);border-color:transparent;margin-top:10px">⚠️ <b>Esta copia no trae la caja ni los gastos</b> (está hecha con una versión antigua de la app de gestión). Los pagos sí se importan. Para traer la caja, saca una copia completa con el archivo <b>exportar-copia-gestion.html</b> e impórtala también.</div>`}
     <div class="modal-actions"><button class="btn" data-a="close">Cancelar</button><button class="btn primary" data-a="gest-run">Importar</button></div>`, 'wide');
 }
 function runGestionImport() {
