@@ -172,6 +172,7 @@
     db.schedule.forEach(t => { t.members = t.members || []; });
   }
   const reload = () => enqueue(async () => { await flushNow(); role === 'admin' ? await loadAdmin() : await loadClient(); });
+  window.reloadData = () => reload();   // botón «Actualizar» del panel
 
   // ---------- Guardar cambios del administrador ----------
   let flushTimer = null;

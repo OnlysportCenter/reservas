@@ -33,6 +33,9 @@ const ICONS = {
   out: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   euro: '<path d="M17.5 6.5A7 7 0 1 0 17.5 17.5M4 10.5h9M4 13.5h9"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>',
+  refresh: '<path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5L20 16M20 20v-4h-4"/>',
 };
 const icon = (name, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${extra}>${ICONS[name]}</svg>`;
 
@@ -115,6 +118,7 @@ function render() {
       <header class="topbar">
         <div class="brand">${brandMark(34)}${brandName()} ${u.role === 'admin' ? '<span class="role-tag">ADMIN</span>' : ''}</div>
         ${u.role === 'client' ? `<button class="icon-btn bell-btn ${unread ? 'has-unread' : ''}" data-a="notifs" aria-label="${unread ? `${unread} notificaciones sin leer` : 'Notificaciones'}">${icon('bell')}${unread ? `<span class="badge">${unread > 9 ? '9+' : unread}</span>` : ''}</button>` : ''}
+        ${u.role === 'admin' ? `<button class="icon-btn" data-a="admin-theme" aria-label="Cambiar a modo ${document.documentElement.dataset.theme === 'dark' ? 'claro' : 'oscuro'}" title="Modo ${document.documentElement.dataset.theme === 'dark' ? 'claro' : 'oscuro'} (solo en este ordenador)">${icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')}</button>` : ''}
         <button class="icon-btn" data-a="logout" aria-label="Salir" title="Cerrar sesión">${icon('out')}</button>
       </header>
       <main class="content">${(views[state.view] || views[nav[0][0]])()}</main>
@@ -570,6 +574,7 @@ function openSession(id) {
     <div class="sx-head" style="--c:${sessionColor(s)}">
       <div class="sx-time"><b>${s.time}</b><span>${s.duration} min</span></div>
       <div class="grow"><h2>${esc(ct.name)}</h2><div class="sx-sub">${fmtDateLong(s.date)} · ${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div><div style="margin-top:6px">${statusTag}${s.hidden ? '<span class="sx-tag">🙈 Oculta</span>' : ''}</div></div>
+      <button class="btn sm refresh-btn" data-a="refresh-modal" data-k="session" data-id="${s.id}" title="Ver los últimos cambios (si alguien se ha apuntado o quitado)">${icon('refresh', 'width="17" height="17"')} Actualizar</button>
       <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
     </div>
     ${ct.hidden ? '<div class="card small" style="background:var(--surface-2);border-color:transparent;margin:12px 0 0">🙈 Todo el tipo de clase está oculto a los clientes (se cambia en Clases › Tipos de clase).</div>' : ''}
@@ -659,6 +664,7 @@ function openSlot(slotId) {
   const others = clients().filter(c => c.active && !t.members.includes(c.id)).sort((a, b) => a.name.localeCompare(b.name));
   const next = db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > new Date() && !s.cancelled).sort((a, b) => sessionStart(a) - sessionStart(b))[0];
   openModal(`${modalHead(`Grupo · ${esc(slotLabel(t))}`)}
+    <div class="row" style="justify-content:flex-end;margin:-6px 0 10px"><button class="btn sm refresh-btn" data-a="refresh-modal" data-k="slot" data-id="${t.id}">${icon('refresh', 'width="17" height="17"')} Actualizar</button></div>
     <div class="card row wrap" style="margin:-4px 0 12px;gap:12px">
       <div class="grow"><b>Plazas de este turno</b><div class="muted small">${t.capacity ? 'Propias de este turno' : `Las del tipo de clase (${ct.capacity})`}. Se aplican a todas sus próximas clases.</div></div>
       <input type="number" min="1" max="200" id="slot-cap" class="search" style="margin:0;width:90px" value="${slotCapacity(t)}">
@@ -1253,6 +1259,16 @@ const actions = {
   'mine-tab': d => { state.mineTab = d.t; render(); },
   privacy: () => openPrivacy(),
   'theme-pref': d => { setThemePref(d.v); render(); },
+  // modo claro / oscuro del panel: se guarda solo en este ordenador
+  'admin-theme': () => { setThemePref(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); render(); },
+  // vuelve a pedir los datos al servidor y redibuja la ventana abierta (clase o grupo)
+  'refresh-modal': async (d, el) => {
+    el.disabled = true; el.classList.add('spinning');
+    try { if (window.reloadData) await window.reloadData(); } catch (e) { console.error(e); }
+    const reopen = d.k === 'slot' ? (getSlot(d.id) && (() => openSlot(d.id))) : (getSession(d.id) && (() => openSession(d.id)));
+    if (reopen) { reopen(); toast('Actualizado', 'ok'); } else { closeModal(); toast('Ya no existe', 'err'); }
+    render();
+  },
   'notif-clear': async (d, el) => { el.disabled = true; await deleteReadNotifications(state.userId); openNotifications(); render(); toast('Notificaciones leídas borradas', 'ok'); },
   'notif-del': async d => { await deleteNotification(d.id); openNotifications(); render(); },
   'pay-answer': async (d, el) => {

@@ -314,6 +314,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .pay-methods { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
 .pay-method { padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
 .pay-row { flex-wrap: wrap; }
+.refresh-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.refresh-btn.spinning svg { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .bg-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .bg-day { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1.5px solid var(--border); border-left: 5px solid var(--c, #2F5D8A); border-radius: 12px; cursor: pointer; background: var(--surface); }
 .bg-top { display: flex; align-items: center; gap: 8px; }
