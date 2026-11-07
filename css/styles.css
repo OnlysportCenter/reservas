@@ -296,6 +296,25 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .mtag.warn { background: var(--warn-bg); color: var(--warn); }
 .mtag.danger { background: var(--danger-bg); color: var(--danger); }
 .avatar.wl { background: #FDF0DD; color: #B86A06; }
+/* Usuarios comodín (plazas del centro) */
+.avatar.ph { background: #EEE7F8; color: #6D4C9F; font-size: 18px; }
+.mtag.ph { background: #EEE7F8; color: #6D4C9F; }
+.sx-member.is-ph { background: color-mix(in srgb, #EEE7F8 45%, transparent); }
+.ph-card { border-color: #D9CBEE; background: color-mix(in srgb, #EEE7F8 40%, var(--surface)); }
+.ph-btn { background: #6D4C9F; border-color: #6D4C9F; color: #fff; font-weight: 700; }
+.ph-btn:hover { background: #5C3E8A; filter: none; }
+/* «No avisar cuando apunto yo» */
+.silent-note { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; margin: 4px 0 10px;
+  border-radius: 12px; background: #EEE7F8; color: #4A2F75; font-size: 13px; }
+.silent-link { background: none; border: 0; padding: 0; margin: 0 0 10px; color: #6D4C9F; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.silent-switch { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px 8px 8px; border-radius: 99px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.silent-switch .sw { width: 38px; height: 22px; border-radius: 99px; background: #1F7A45; position: relative; flex: none; transition: background .2s; }
+.silent-switch .sw i { position: absolute; top: 3px; left: 19px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .2s; }
+.silent-switch.on { background: #EEE7F8; border-color: #D9CBEE; color: #4A2F75; }
+.silent-switch.on .sw { background: #6D4C9F; }
+.silent-switch.on .sw i { left: 3px; }
+.silent-check { align-items: flex-start; padding: 12px; border-radius: 12px; background: color-mix(in srgb, #EEE7F8 50%, transparent); }
 /* Botones de asistencia: verde / rojo, bien visibles */
 .att-toggle { display: inline-flex; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); background: var(--surface); }
 .att { border: 0; background: transparent; padding: 9px 14px; font-weight: 700; font-size: 13.5px; color: var(--muted); min-height: 40px; }

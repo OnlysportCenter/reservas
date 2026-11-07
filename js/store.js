@@ -39,7 +39,7 @@ function runMonthlyDue() {
   if (!db.autoDueMonth) { db.autoDueMonth = mk; saveDB(); return; }
   if (db.autoDueMonth === mk) return;
   db.autoDueMonth = mk;
-  clients().filter(c => c.active && c.planId && (c.paymentMonth || '') !== mk)
+  clients().filter(c => c.active && !c.isPlaceholder && c.planId && (c.paymentMonth || '') !== mk)
     .forEach(c => markPaymentDue(c.id, { email: !!s.autoMonthlyEmail, app: true }));
   saveDB();
 }
@@ -238,6 +238,7 @@ function setSlotCapacity(slotId, cap) {
 const slotLabel = t => `${DOW_LONG[t.weekday]} ${t.time} · ${getClassType(t.classTypeId)?.name}`;
 const groupsOf = userId => db.schedule.filter(t => (t.members || []).includes(userId)).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7) || a.time.localeCompare(b.time));
 function addGroupMember(slotId, userId, { email = true, app = true } = {}) {
+  if (db.settings.silentAdminAdd) email = app = false;   // «No avisar cuando apunto yo»
   const t = getSlot(slotId), u = getUser(userId);
   if (!t.members.includes(userId)) t.members.push(userId);
   let n = 0;
@@ -314,6 +315,7 @@ const freeSpots = s => Math.max(0, s.capacity - (s.stats ? s.stats.booked : book
 
 // Estado general de la tarifa (sin mirar una semana concreta)
 function planStatus(u) {
+  if (u.isPlaceholder) return { ok: true };   // comodín del centro: siempre puede ocupar plaza
   if (u.blocked) return { ok: false, blocked: true, msg: `Tu cuenta está bloqueada${u.blockedReason ? ': ' + u.blockedReason : ''}. Habla con el centro.` };
   if (!u.planId || !getPlan(u.planId)) return { ok: false, msg: 'No tienes ninguna tarifa activa. Habla con el centro.' };
   if (!isWeekly(u) && u.credits !== null && u.credits <= 0) return { ok: false, msg: 'No te quedan clases en tu bono.' };
@@ -343,6 +345,7 @@ function weekLeft(u, d) { return Math.max(0, weekAllowance(u, d) - weekCount(u.i
 
 // ¿Puede este cliente gastar una clase en esta sesión concreta?
 function canUseFor(u, s) {
+  if (u.isPlaceholder) return { ok: true };   // comodín: sin límites semanales ni de un día
   const ps = planStatus(u);
   if (!ps.ok) return ps;
   const d = parseKey(s.date);
@@ -401,6 +404,7 @@ function carryOverWeek(userId, d, { email = false, app = true } = {}) {
 
 // ---------- Notificaciones y correo ----------
 function notify(userId, text, type = 'info') {
+  if (getUser(userId)?.isPlaceholder) return;   // los comodines no tienen app
   db.notifications.push({ id: uid(), userId, text, type, date: new Date().toISOString(), read: false });
 }
 // El cliente borra sus notificaciones (con servidor lo sustituye remote.js)
@@ -412,6 +416,7 @@ function notificationsFor(userId) {
 // Prototipo: el correo se guarda en una bandeja simulada. Con servidor real se enviará de verdad.
 function sendEmail(userId, subject, body) {
   const u = getUser(userId);
+  if (!u || u.isPlaceholder || !u.email) return;   // sin correo (comodines)
   db.emails.push({ id: uid(), userId, to: u.email, subject, body, date: new Date().toISOString() });
 }
 function generateReminders(userId) {
@@ -470,6 +475,7 @@ function book(userId, sessionId) {
 // whenFull: 'force' (apuntar aunque supere el aforo) | 'waitlist' (poner en lista de espera)
 // mode: 'auto' (plaza si hay, si no según whenFull) | 'waitlist' (siempre a lista de espera)
 function adminAddToSessions(userId, sessionIds, { whenFull = 'waitlist', mode = 'auto', email = true, app = true } = {}) {
+  if (db.settings.silentAdminAdd) email = app = false;   // «No avisar cuando apunto yo»
   const u = getUser(userId);
   const res = { booked: [], waitlist: [], skipped: [] };
   sessionIds.map(getSession).filter(Boolean).sort((a, b) => sessionStart(a) - sessionStart(b)).forEach(s => {
@@ -674,6 +680,21 @@ function saveClient(data) {
   else db.users.push({ id: uid(), role: 'client', active: true, blocked: false, blockedReason: '', weeklyLimit: null, planId: null, credits: 0, planExpires: null, createdAt: dateKey(new Date()), ...data });
   saveDB();
   return { ok: true };
+}
+// Usuario comodín: ficha del centro sin correo ni tarifa, para que el administrador reserve plazas
+const placeholders = () => db.users.filter(u => u.role === 'client' && u.isPlaceholder);
+const realClients = () => db.users.filter(u => u.role === 'client' && !u.isPlaceholder);
+function createPlaceholder(name) {
+  const n = (name || '').trim() || `Plaza del centro ${placeholders().length + 1}`;
+  const id = uid();
+  db.users.push({ id, role: 'client', isPlaceholder: true, name: n, email: '', phone: '', active: true, blocked: false, blockedReason: '', weeklyLimit: null, planId: null, credits: null, planExpires: null, weekExtras: {}, createdAt: dateKey(new Date()) });
+  saveDB();
+  return id;
+}
+// Un comodín libre en esa clase (crea uno nuevo si todos están ya dentro)
+function freePlaceholderFor(sessionId) {
+  const p = placeholders().find(u => u.active && !userBookingIn(u.id, sessionId));
+  return p ? p.id : createPlaceholder();
 }
 function blockUser(userId, reason, { cancelFuture = false, email = true } = {}) {
   const u = getUser(userId);

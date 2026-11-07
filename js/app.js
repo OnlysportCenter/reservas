@@ -463,13 +463,15 @@ function viewAdminToday() {
   const ss = sessionsOn(today).filter(s => !s.cancelled);
   const booked = ss.reduce((a, s) => a + bookedIn(s.id).length, 0);
   const cap = ss.reduce((a, s) => a + s.capacity, 0);
-  const active = clients().filter(c => c.active);
+  const active = realClients().filter(c => c.active);
   const soon = addDays(startOfDay(new Date()), 7);
   const dueCount = active.filter(c => c.paymentDue).length;
   const noPlan = active.filter(c => !planStatus(c).ok);
   return `
     <div class="page-title"><h1>${(() => { const h = new Date().getHours(); return h < 13 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches'; })()}</h1></div>
-    <p class="admin-hello">${fmtDateLong(today)} · ${ss.length} ${ss.length === 1 ? 'clase' : 'clases'} hoy</p>
+    <div class="row between wrap" style="margin-bottom:14px"><p class="admin-hello" style="margin:0">${fmtDateLong(today)} · ${ss.length} ${ss.length === 1 ? 'clase' : 'clases'} hoy</p>
+      <button class="silent-switch ${db.settings.silentAdminAdd ? 'on' : ''}" data-a="silent-toggle" title="Cuando apuntas tú a alguien en una clase">
+        <span class="sw"><i></i></span>${db.settings.silentAdminAdd ? '🔕 No aviso a nadie cuando apunto yo' : '🔔 Aviso a los clientes cuando les apunto'}</button></div>
     <div class="grid-stats">
       <div class="card kpi" style="--k:#2F5D8A"><div class="kpi-ic">${icon('users')}</div><div><div class="v">${active.length}</div><div class="l">Socios activos</div></div></div>
       <div class="card kpi" style="--k:#1F7A45"><div class="kpi-ic">${icon('check')}</div><div><div class="v">${booked}</div><div class="l">Reservas hoy</div></div></div>
@@ -511,6 +513,18 @@ const notifyChecks = (email = true, app = true) => `
   <label class="check"><input type="checkbox" id="n-email" ${email ? 'checked' : ''}> ✉️ Avisar por correo</label>
   <label class="check"><input type="checkbox" id="n-app" ${app ? 'checked' : ''}> 🔔 Avisar en la app</label>`;
 const readNotify = () => ({ email: !!$('#n-email')?.checked, app: !!$('#n-app')?.checked });
+// Casillas para cuando YO apunto a alguien: si «No avisar cuando apunto yo» está activo, no hay casillas y no se avisa
+const addNotify = (email = true, app = true) => `<div class="notify-block" data-e="${email ? 1 : 0}" data-ap="${app ? 1 : 0}">${db.settings.silentAdminAdd
+  ? `<div class="silent-note"><span>🔕 <b>Avisos desactivados</b> cuando apuntas tú: no se enviará correo ni aviso en la app.</span>
+      <button type="button" class="btn sm" data-a="silent-toggle">Volver a avisar</button></div>`
+  : `${notifyChecks(email, app)}<button type="button" class="silent-link" data-a="silent-toggle">🔕 No avisar a nadie cuando apunto yo</button>`}</div>`;
+function toggleSilentAdd() {
+  db.settings.silentAdminAdd = !db.settings.silentAdminAdd;
+  saveDB();
+  document.querySelectorAll('.notify-block').forEach(el => { el.outerHTML = addNotify(el.dataset.e === '1', el.dataset.ap === '1'); });
+  toast(db.settings.silentAdminAdd ? '🔕 Ya no se avisará a nadie cuando apuntes tú' : '🔔 Vuelves a poder avisar al apuntar', 'ok');
+  if (state.view === 'a-today') render();
+}
 
 function viewAdminAgenda() {
   const list = sessionsOn(state.date);
@@ -534,6 +548,11 @@ function openSession(id) {
   const statusTag = s.cancelled ? '<span class="sx-tag danger">Cancelada</span>' : ended ? '<span class="sx-tag">Terminada</span>' : past ? '<span class="sx-tag live">En curso</span>' : isVisibleToClients(s) ? '<span class="sx-tag ok">👁 Visible para socios</span>' : '<span class="sx-tag">🔒 Aún no la ven los socios</span>';
   const memberRow = b => {
     const u = getUser(b.userId), p = getPlan(u.planId), st = attendStatus(b);
+    if (u.isPlaceholder) return `<div class="sx-member is-ph">
+      <div class="avatar ph">🃏</div>
+      <div class="grow"><div class="sx-name">${esc(u.name)}</div><div class="sx-meta"><span class="mtag ph">Plaza del centro</span></div></div>
+      ${past ? '' : `<button class="btn sm quitar" data-a="admin-unbook" data-id="${b.id}" title="Liberar la plaza">${icon('x', 'width="15" height="15"')} Liberar</button>`}
+    </div>`;
     const tags = [b.source === 'group' ? '<span class="mtag group">Grupo fijo</span>' : '<span class="mtag">Extra</span>',
       u.paymentDue ? '<span class="mtag warn">💶 Cuota</span>' : '', u.blocked ? '<span class="mtag danger">🔒 Bloqueado</span>' : ''].join('');
     return `<div class="sx-member ${st === 'noshow' ? 'noshow' : ''}">
@@ -575,11 +594,16 @@ function openSession(id) {
       <div class="sx-side">
         ${!s.cancelled && !past ? `<div class="card">
           <b>Apuntar a un cliente</b>
-          <select class="search" style="margin:10px 0 6px" id="add-client-sel"><option value="">Elige cliente…</option>${free.map(c => `<option value="${c.id}">${esc(c.name)}${c.blocked ? ' (bloqueado)' : ''}</option>`).join('')}</select>
-          <div class="small">${notifyChecks()}</div>
+          <select class="search" style="margin:10px 0 6px" id="add-client-sel"><option value="">Elige cliente…</option>${free.filter(c => !c.isPlaceholder).map(c => `<option value="${c.id}">${esc(c.name)}${c.blocked ? ' (bloqueado)' : ''}</option>`).join('')}
+            ${free.some(c => c.isPlaceholder) ? `<optgroup label="🃏 Comodines">${free.filter(c => c.isPlaceholder).map(c => `<option value="${c.id}">🃏 ${esc(c.name)}</option>`).join('')}</optgroup>` : ''}</select>
+          <div class="small">${addNotify()}</div>
           <div class="stack" style="gap:8px"><button class="btn primary block" data-a="admin-book" data-id="${s.id}" data-m="auto">Apuntar a la clase</button>
             <button class="btn btn-wait block" data-a="admin-book" data-id="${s.id}" data-m="waitlist">Poner en lista de espera</button></div>
-          <p class="muted small" style="margin:8px 0 0">Puedes apuntar aunque esté llena.</p></div>` : ''}
+          <p class="muted small" style="margin:8px 0 0">Puedes apuntar aunque esté llena.</p></div>
+        <div class="card ph-card">
+          <b>🃏 Reservar plaza del centro</b>
+          <p class="muted small" style="margin:6px 0 10px">Ocupa una plaza con un usuario comodín (sin correo ni avisos). Pulsa varias veces para reservar varias.</p>
+          <button class="btn block ph-btn" data-a="ph-book" data-id="${s.id}">🃏 Reservar 1 plaza</button></div>` : ''}
         <div class="card">
           <b>Ajustes de esta clase</b>
           <div class="row" style="margin-top:10px"><label class="muted small grow">Aforo</label><input type="number" min="1" class="search" style="margin:0;width:90px" value="${s.capacity}" data-change="capacity" data-id="${s.id}"></div>
@@ -620,8 +644,8 @@ function openMultiAdd(userId) {
         <select name="mode"><option value="auto">En la clase (si está completa → lista de espera)</option>
           <option value="force">En la clase aunque esté completa (supera el aforo)</option>
           <option value="waitlist">Siempre en lista de espera</option></select></div>
-      ${notifyChecks()}
-      <p class="muted small">Si eliges avisar por correo, recibirá un único correo con todas las clases.</p>
+      ${addNotify()}
+      ${db.settings.silentAdminAdd ? '' : '<p class="muted small">Si eliges avisar por correo, recibirá un único correo con todas las clases.</p>'}
       <div class="modal-actions"><button type="button" class="btn" data-a="client-open" data-id="${userId}">Volver</button><button class="btn primary" type="submit">Apuntar</button></div>
     </form>`);
 }
@@ -673,7 +697,7 @@ function openSlot(slotId) {
       return `<label class="multi-item" data-search="${esc(norm2(c.name + ' ' + c.email))}" data-groups="${ng}"><input type="checkbox" name="gadd" value="${c.id}">
         <span class="grow ellipsis">${esc(c.name)}</span><span class="muted small">${esc(getPlan(c.planId)?.name || 'sin tarifa')} · ${ng}${w ? '/' + w : ''} grupo(s)</span></label>`;
     }).join('') || '<div class="empty">No quedan clientes por añadir.</div>'}</div>
-    ${notifyChecks(false, true)}
+    ${addNotify(false, true)}
     <button class="btn primary" data-a="group-add" data-id="${t.id}">Añadir seleccionados al grupo</button>
     <p class="muted small">Se le reservan ya las próximas clases de este horario y, a partir de ahí, todas las semanas.</p>
     ${next ? `<div class="modal-actions"><button class="btn" data-a="session-open" data-id="${next.id}">Ver próxima clase (${fmtDateShort(next.date)})</button></div>` : ''}`);
@@ -750,7 +774,7 @@ function openProspectForm(id) {
 }
 
 function viewAdminClients() {
-  const tabs = `<div class="tabs"><button class="${state.clientsTab !== 'prospects' ? 'active' : ''}" data-a="clients-tab" data-t="clients">Clientes (${clients().length})</button>
+  const tabs = `<div class="tabs"><button class="${state.clientsTab !== 'prospects' ? 'active' : ''}" data-a="clients-tab" data-t="clients">Clientes (${realClients().length})</button>
     <button class="${state.clientsTab === 'prospects' ? 'active' : ''}" data-a="clients-tab" data-t="prospects">📝 Nuevos en espera (${(db.prospects || []).length})</button></div>`;
   if (state.clientsTab === 'prospects') return `
     <div class="page-title"><h1>Nuevos en espera</h1><button class="btn primary" data-a="prospect-edit">${icon('plus', 'width="18" height="18"')}Añadir persona</button></div>
@@ -770,17 +794,22 @@ function viewAdminClientsList(tabs = '') {
     pay: ['💶 Cuota pendiente', c => c.paymentDue],
     blocked: ['Bloqueados', c => c.blocked],
     bademail: ['Email inválido', c => c.emailInvalid || !c.email],
+    ph: ['🃏 Comodines', c => c.isPlaceholder],
   };
-  const f = filters[state.clientFilter || 'all'] || filters.all;
-  const list = clients().filter(c => (!q || norm2(c.name).includes(q) || norm2(c.email).includes(q)) && f[1](c)).sort((a, b) => a.name.localeCompare(b.name));
-  const selMode = !!state.selectMode;
+  const fk = state.clientFilter || 'all', f = filters[fk] || filters.all;
+  const pool = k => k === 'ph' ? placeholders() : realClients();
+  const list = pool(fk).filter(c => (!q || norm2(c.name).includes(q) || norm2(c.email).includes(q)) && f[1](c)).sort((a, b) => a.name.localeCompare(b.name));
+  const selMode = !!state.selectMode && fk !== 'ph';
   return `
-    <div class="page-title"><h1>Clientes <span class="muted" style="font-size:15px">(${clients().length})</span></h1><div class="row wrap">
+    <div class="page-title"><h1>Clientes <span class="muted" style="font-size:15px">(${realClients().length})</span></h1><div class="row wrap">
       <button class="btn" data-a="select-mode">${selMode ? 'Terminar selección' : '☑️ Seleccionar'}</button>
-      <button class="btn" data-a="import">⬆️ Importar</button><button class="btn primary" data-a="client-edit">${icon('plus', 'width="18" height="18"')}Nuevo</button></div></div>
+      <button class="btn" data-a="import">⬆️ Importar</button>
+      <button class="btn" data-a="ph-new" title="Usuario sin correo para reservar plazas tú mismo">🃏 Comodín</button>
+      <button class="btn primary" data-a="client-edit">${icon('plus', 'width="18" height="18"')}Nuevo</button></div></div>
     ${tabs}
     <input class="search" placeholder="Buscar por nombre o email…" value="${esc(state.search)}" data-input="search">
-    <div class="tabs">${Object.entries(filters).map(([k, [l, fn]]) => `<button class="${(state.clientFilter || 'all') === k ? 'active' : ''}" data-a="client-filter" data-f="${k}">${l} (${clients().filter(fn).length})</button>`).join('')}</div>
+    <div class="tabs">${Object.entries(filters).map(([k, [l, fn]]) => `<button class="${fk === k ? 'active' : ''}" data-a="client-filter" data-f="${k}">${l} (${pool(k).filter(fn).length})</button>`).join('')}</div>
+    ${fk === 'ph' ? `<div class="card small ph-card" style="margin-bottom:10px">🃏 Los <b>comodines</b> son usuarios del centro sin correo ni tarifa: solo los usas tú para reservar plazas (desde la ventana de cada clase, «Reservar plaza del centro»). No reciben avisos ni cuentan como socios.</div>` : ''}
     ${selMode ? `<div class="card bulk-bar">
       <div class="row wrap"><b>${state.sel.size} seleccionados</b>
         <button class="btn sm" data-a="sel-all">Marcar los ${list.length} de la lista</button><button class="btn sm ghost" data-a="sel-none">Desmarcar</button></div>
@@ -794,6 +823,12 @@ function viewAdminClientsList(tabs = '') {
     </div>` : ''}
     <div class="card list">${list.length ? list.map(c => {
       const p = getPlan(c.planId), ps = planStatus(c);
+      if (c.isPlaceholder) {
+        const nb = db.bookings.filter(b => b.userId === c.id && b.status === 'booked' && getSession(b.sessionId) && sessionStart(getSession(b.sessionId)) > new Date()).length;
+        return `<div class="list-item clickable" data-a="client-open" data-id="${c.id}"><div class="avatar ph">🃏</div>
+          <div class="grow"><div class="ellipsis" style="font-weight:600">${esc(c.name)} ${!c.active ? '<span class="pill">Inactivo</span>' : ''}</div><div class="muted small">Comodín · sin correo</div></div>
+          <span class="pill">${nb} ${nb === 1 ? 'plaza reservada' : 'plazas reservadas'}</span></div>`;
+      }
       return `<div class="list-item clickable" data-a="${selMode ? 'sel-toggle' : 'client-open'}" data-id="${c.id}">
         ${selMode ? `<input type="checkbox" ${state.sel.has(c.id) ? 'checked' : ''} style="pointer-events:none;width:18px;height:18px">` : ''}
         <div class="avatar">${initials(c.name)}</div>
@@ -804,7 +839,36 @@ function viewAdminClientsList(tabs = '') {
     }).join('') : '<div class="empty">No hay clientes.</div>'}</div>`;
 }
 
+// Ficha de un comodín: solo nombre y plazas que tiene reservadas
+function openPlaceholder(c) {
+  state.back = 'client';
+  const now = new Date();
+  const next = db.bookings.filter(b => b.userId === c.id && ['booked', 'waitlist'].includes(b.status)).map(b => ({ b, s: getSession(b.sessionId) }))
+    .filter(x => x.s && !x.s.cancelled && sessionStart(x.s) > now).sort((a, b) => sessionStart(a.s) - sessionStart(b.s));
+  openModal(`${modalHead('🃏 ' + esc(c.name))}
+    <p class="muted" style="margin-top:-8px">Usuario comodín del centro · sin correo, sin tarifa y sin avisos.</p>
+    <div class="row wrap" style="margin-bottom:12px">
+      <button class="btn primary" data-a="multi-add" data-id="${c.id}">${icon('plus', 'width="16" height="16"')}Reservar en clases</button>
+      <button class="btn" data-a="ph-new" data-id="${c.id}">✏️ Cambiar nombre</button></div>
+    <div class="section-h">Plazas reservadas (${next.length})</div>
+    <div class="card list" style="margin-bottom:12px">${next.length ? next.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
+      <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
+      <button class="btn sm ghost" data-a="admin-unbook" data-id="${b.id}" title="Liberar plaza">${icon('x', 'width="16" height="16"')}</button></div>`).join('') : '<div class="empty">No tiene plazas reservadas.</div>'}</div>
+    <div class="modal-actions"><button class="btn" data-a="ph-toggle" data-id="${c.id}">${c.active ? 'Desactivar comodín' : 'Activar comodín'}</button>
+      <button class="btn primary" data-a="close">Hecho</button></div>`);
+}
+function openPlaceholderForm(id) {
+  const c = id ? getUser(id) : null;
+  openModal(`${modalHead(c ? 'Cambiar nombre' : '🃏 Nuevo usuario comodín')}
+    <p class="muted small" style="margin-top:-8px">Un usuario sin correo para reservar plazas tú mismo (pruebas, invitados, un amigo, plazas que quieres guardar…). No necesita correo ni tarifa y no recibe avisos.</p>
+    <form data-form="placeholder" data-id="${id || ''}">
+      <div class="field"><label>Nombre que verás en las clases</label><input name="name" placeholder="p. ej. Plaza del centro, Invitado, Prueba…" value="${esc(c?.name || '')}"></div>
+      <div class="modal-actions"><button type="button" class="btn" data-a="close">Cancelar</button><button class="btn primary" type="submit">Guardar</button></div>
+    </form>`);
+}
+
 function openClient(id) {
+  if (getUser(id)?.isPlaceholder) return openPlaceholder(getUser(id));
   const c = getUser(id), p = getPlan(c.planId), ps = planStatus(c);
   state.back = 'client';
   const now = new Date();
@@ -836,7 +900,7 @@ function openClient(id) {
     <div class="row" style="margin-bottom:12px"><select class="search" style="margin:0" id="client-group-sel"><option value="">Añadir a un grupo…</option>
       ${db.schedule.filter(t => !t.members.includes(c.id)).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7) || a.time.localeCompare(b.time)).map(t => `<option value="${t.id}">${esc(slotLabel(t))} (${t.members.length}/${slotCapacity(t)})</option>`).join('')}</select>
       <button class="btn" data-a="client-group-add" data-id="${c.id}">Añadir</button></div>
-    <div class="row wrap small" style="margin:-4px 0 8px">${notifyChecks()}</div>
+    <div class="row wrap small" style="margin:-4px 0 8px">${addNotify()}</div>
     <div class="section-h" style="margin-top:4px">Próximas clases (${next.length})</div>
     <div class="card list" style="margin-bottom:12px">${next.length ? next.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
       <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
@@ -1073,6 +1137,7 @@ function viewAdminSettings() {
         <div class="field"><label>Máximo en lista de espera</label><input name="waitlistMax" type="number" min="1" max="50" value="${s.waitlistMax}"></div>
       </div>
       <label class="check"><input type="checkbox" name="onePerDay" ${s.onePerDay ? 'checked' : ''}> Máximo una clase al día por cliente</label>
+      <label class="check silent-check"><input type="checkbox" name="silentAdminAdd" ${s.silentAdminAdd ? 'checked' : ''}> 🔕 <span><b>No avisar a ningún usuario (ni por correo ni en la app) cuando soy yo quien les apunta en las clases</b><br><span class="muted small">Útil si vas apuntando a la gente de uno en uno y no quieres llenarles el correo. Los avisos de lista de espera, cancelaciones y cuotas siguen funcionando.</span></span></label>
       <div class="field"><label>Días que aparecen en la app de los socios</label>
         <div class="row wrap">${[1, 2, 3, 4, 5, 6, 0].map(w => `<label class="tab-radio"><input type="checkbox" name="showDay" value="${w}" ${(s.hiddenWeekdays || []).map(Number).includes(w) ? '' : 'checked'}><span>${DOW[w]}</span></label>`).join('')}</div>
         <p class="muted small" style="margin:6px 0 0">Desmarca sábado y domingo si no hay clases, para que el calendario de los socios no quede tan cargado. Tú los sigues viendo.</p></div>
@@ -1197,6 +1262,14 @@ const actions = {
     const r = adminAddToSessions(cid, [d.id], { mode: d.m, whenFull: 'force', ...readNotify() });
     toast(r.waitlist.length ? 'Puesto en lista de espera' : 'Cliente apuntado', 'ok'); openSession(d.id); render();
   },
+  'ph-book': d => {
+    const pid = freePlaceholderFor(d.id);
+    adminAddToSessions(pid, [d.id], { mode: 'auto', whenFull: 'force', email: false, app: false });
+    toast(`🃏 Plaza reservada (${getUser(pid).name})`, 'ok'); openSession(d.id); render();
+  },
+  'ph-new': d => openPlaceholderForm(d.id),
+  'silent-toggle': () => toggleSilentAdd(),
+  'ph-toggle': d => { const c = getUser(d.id); c.active = !c.active; saveDB(); toast(c.active ? 'Comodín activado' : 'Comodín desactivado', 'ok'); openClient(d.id); render(); },
   'multi-add': d => openMultiAdd(d.id),
   'client-block': d => openBlockForm(d.id),
   'client-unblock': d => { unblockUser(d.id); toast('Cliente desbloqueado y avisado', 'ok'); openClient(d.id); render(); },
@@ -1360,6 +1433,12 @@ const forms = {
     if (!u) return toast('No encontramos ese email. Pide al centro que te dé de alta.', 'err');
     login(u.id);
   },
+  placeholder: (f, form) => {
+    const id = form.dataset.id, name = f.get('name').trim();
+    if (id) { getUser(id).name = name || getUser(id).name; saveDB(); toast('Nombre cambiado', 'ok'); openClient(id); }
+    else { createPlaceholder(name); toast('🃏 Comodín creado', 'ok'); state.clientFilter = 'ph'; closeModal(); }
+    render();
+  },
   client: (f, form) => {
     const id = form.dataset.id || null;
     const data = { name: f.get('name').trim(), email: f.get('email').trim(), phone: f.get('phone').trim() };
@@ -1432,7 +1511,7 @@ const forms = {
       bookWindowDays: Number(f.get('bookWindowDays')), cancelHours: Number(f.get('cancelHours')),
       reminderHours: Number(f.get('reminderHours')), waitlistMax: Number(f.get('waitlistMax')), waitlistEnabled: f.get('waitlistEnabled') === 'on',
       publishMode: f.get('publishMode'), publishWeekday: Number(f.get('publishWeekday')), publishTime: f.get('publishTime') || '20:00',
-      weeklyLimit: Number(f.get('weeklyLimit')), emailOnPromote: f.get('emailOnPromote') === 'on', onePerDay: f.get('onePerDay') === 'on',
+      weeklyLimit: Number(f.get('weeklyLimit')), emailOnPromote: f.get('emailOnPromote') === 'on', onePerDay: f.get('onePerDay') === 'on', silentAdminAdd: f.get('silentAdminAdd') === 'on',
       hiddenWeekdays: [0, 1, 2, 3, 4, 5, 6].filter(w => !f.getAll('showDay').map(Number).includes(w)),
       autoMonthlyDue: f.get('autoMonthlyDue') === 'on', autoMonthlyDay: Math.min(28, Math.max(1, Number(f.get('autoMonthlyDay')) || 1)), autoMonthlyEmail: f.get('autoMonthlyEmail') === 'on',
     });
