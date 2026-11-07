@@ -64,6 +64,8 @@ function migrate() {
   if (!db.workouts) { db.workouts = []; changed = true; }
   if (!db.exercises) { db.exercises = []; changed = true; }
   if (!db.ptClients) { db.ptClients = []; changed = true; }
+  if (!db.importLogs) { db.importLogs = db.settings.importLog || []; changed = true; }
+  if (db.settings.importLog) { delete db.settings.importLog; changed = true; }   // ya no va en los ajustes (los ve cualquiera)
   if (!db.ptSessions) { db.ptSessions = []; changed = true; }
   db.users.forEach(u => { if (u.planExpires) { u.planExpires = null; changed = true; } });   // ya no hay caducidad
   db.plans.forEach(p => { if (!p.type) { p.type = 'bono'; p.perWeek = null; changed = true; } });

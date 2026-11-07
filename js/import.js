@@ -226,7 +226,7 @@ function renderImportInner() {
   if (!imp.rows.length) {
     openModal(`${modalHead('Importar clientes')}
       <p>Sube la lista de clientes que ya tienes: <b>Excel (.xlsx)</b>, <b>CSV</b> o <b>JSON</b>. Sirve el archivo que exportes desde Bookyway u otra aplicación.</p>
-      ${(db.settings.importLog || []).length || importDays().length ? `<div class="card small row between wrap" style="gap:10px;margin-bottom:12px"><span>¿Te has equivocado de archivo?</span><button class="btn sm danger" data-a="imp-undo-list">↩️ Deshacer una importación</button></div>` : ''}
+      ${importLogs().length || importDays().length ? `<div class="card small row between wrap" style="gap:10px;margin-bottom:12px"><span>¿Te has equivocado de archivo?</span><button class="btn sm danger" data-a="imp-undo-list">↩️ Deshacer una importación</button></div>` : ''}
       <label class="dropzone" id="imp-drop">
         <input type="file" id="imp-file" accept=".csv,.json,.xlsx,.xls,.txt" hidden>
         <div style="font-size:28px">📄</div><b>Pulsa para elegir el archivo</b><div class="muted small">o arrástralo aquí</div>
@@ -357,7 +357,10 @@ function runImport() {
     res.reserved += syncGroups(u.id);
   });
   // se guardan las 3 últimas importaciones
-  db.settings.importLog = [log, ...(db.settings.importLog || [])].slice(0, 3);
+  // se guardan las 3 últimas (en una tabla que solo ve el administrador)
+  db.importLogs = db.importLogs || [];
+  db.importLogs.push(log);
+  db.importLogs = importLogs().slice(0, 3);
   saveDB();
   closeModal();
   render();
@@ -375,6 +378,7 @@ function runImport() {
 }
 
 // ---------- Deshacer una importación de clientes ----------
+const importLogs = () => [...(db.importLogs || [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
 // Borra un cliente y todo lo suyo (reservas, avisos, pagos, grupos). En el servidor se borra en cascada.
 function purgeClients(ids) {
   const set = new Set(ids);
@@ -388,7 +392,7 @@ function purgeClients(ids) {
   db.users = db.users.filter(u => !set.has(u.id));
 }
 function undoImportLog(logId) {
-  const log = (db.settings.importLog || []).find(l => l.id === logId);
+  const log = importLogs().find(l => l.id === logId);
   if (!log) return null;
   const affectedSessions = new Set(db.bookings.filter(b => log.created.includes(b.userId)).map(b => b.sessionId));
   purgeClients(log.created.filter(id => getUser(id)?.role === 'client'));
@@ -401,20 +405,20 @@ function undoImportLog(logId) {
       .forEach(b => { b.status = 'cancelled'; b.groupRemoved = true; affectedSessions.add(b.sessionId); });
   });
   affectedSessions.forEach(sid => { if (getSession(sid)) promoteWaitlist(sid); });
-  db.settings.importLog = db.settings.importLog.filter(l => l.id !== logId);
+  db.importLogs = (db.importLogs || []).filter(l => l.id !== logId);
   saveDB();
   return log;
 }
 // Importaciones hechas antes de que existiera el registro: clientes importados agrupados por día
 function importDays() {
-  const logged = new Set((db.settings.importLog || []).flatMap(l => l.created));
+  const logged = new Set(importLogs().flatMap(l => l.created));
   const days = {};
   db.users.filter(u => u.role === 'client' && u.imported && u.importSource !== 'gestion' && !logged.has(u.id))
     .forEach(u => (days[u.createdAt] = days[u.createdAt] || []).push(u));
   return Object.entries(days).sort((a, b) => String(b[0]).localeCompare(String(a[0])));
 }
 function openImportUndo() {
-  const logs = db.settings.importLog || [];
+  const logs = importLogs();
   const days = importDays();
   const when = iso => { const d = new Date(iso); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()} a las ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   openModal(`${modalHead('↩️ Deshacer una importación')}
@@ -452,7 +456,7 @@ Object.assign(actions, {
   'imp-template': () => downloadTemplate(),
   'imp-undo-list': () => openImportUndo(),
   'imp-undo': d => {
-    const l = (db.settings.importLog || []).find(x => x.id === d.id);
+    const l = importLogs().find(x => x.id === d.id);
     if (!l) return toast('Esa importación ya no se puede deshacer', 'err');
     confirmModal('Deshacer la importación', `Se borrarán ${l.created.length} clientes creados por «${esc(l.file || 'el archivo')}» (con sus reservas y grupos) y ${l.updated.length} clientes que ya existían volverán a como estaban. No se puede deshacer.`, `data-a="imp-undo-ok" data-id="${l.id}"`, 'Deshacer importación');
   },

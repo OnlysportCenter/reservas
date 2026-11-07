@@ -47,6 +47,7 @@
     workouts: { db: 'workouts', cols: { id: null, week_start: null, position: 1, title: '', rounds: null, work_secs: null, rest_secs: null, notes: '', exercises: [], created_at: NOW } },
     exercises: { db: 'exercises', cols: { id: null, name: '', created_at: NOW } },
     ptClients: { db: 'pt_clients', cols: { id: null, member_id: null, name: '', phone: '', email: '', goal: '', days: '', notes: '', active: true, created_at: NOW } },
+    importLogs: { db: 'import_logs', cols: { id: null, at: NOW, file: '', created: [], updated: [], group_adds: [] } },
     ptSessions: { db: 'pt_sessions', cols: { id: null, client_id: null, date: null, routine: '', notes: '', exercises: [], created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
     sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false } },
@@ -55,8 +56,8 @@
     notifications: { db: 'notifications', cols: { id: null, user_id: null, text: '', type: 'info', date: NOW, read: false } },
     emails: { db: 'emails', cols: { id: null, user_id: null, to_email: '', subject: '', body: '', date: NOW, sent_at: null, error: null } },
   };
-  const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments', 'cashMoves', 'exercises', 'workouts', 'ptClients', 'ptSessions'];
-  const TS = new Set(['cash_moves.created_at', 'workouts.created_at', 'exercises.created_at', 'pt_clients.created_at', 'pt_sessions.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
+  const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments', 'cashMoves', 'exercises', 'workouts', 'ptClients', 'ptSessions', 'importLogs'];
+  const TS = new Set(['import_logs.at', 'cash_moves.created_at', 'workouts.created_at', 'exercises.created_at', 'pt_clients.created_at', 'pt_sessions.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
   const toCamel = s => s === 'to_email' ? 'to' : s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
   const toJS = (t, row) => {
     const o = {};
@@ -99,7 +100,7 @@
   }
   async function loadAdmin() {
     const from = dateKey(addDays(new Date(), -60));
-    const [settings, plans, cts, sched, members, sessions, bookings, anns, notifs, emails, prospects, payments, cashMoves, workouts, exercises, ptClients, ptSessions] = await Promise.all([
+    const [settings, plans, cts, sched, members, sessions, bookings, anns, notifs, emails, prospects, payments, cashMoves, workouts, exercises, ptClients, ptSessions, importLogs] = await Promise.all([
       loadSettings(),
       fetchAll(() => sb.from('plans').select('*').order('id')),
       fetchAll(() => sb.from('class_types').select('*').order('id')),
@@ -117,21 +118,21 @@
       fetchAll(() => sb.from('exercises').select('*').order('id')),
       fetchAll(() => sb.from('pt_clients').select('*').order('id')),
       fetchAll(() => sb.from('pt_sessions').select('*').order('id')),
+      fetchAll(() => sb.from('import_logs').select('*').order('id')),
     ]);
     bookings.forEach(b => delete b.sessions);
-    const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects, payments, cashMoves, workouts, exercises, ptClients, ptSessions };
+    const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects, payments, cashMoves, workouts, exercises, ptClients, ptSessions, importLogs };
     applyLoaded(settings, raw);
   }
   // El socio solo descarga lo que usa: las clases que puede ver (desde el lunes de esta semana hasta
   // donde llega la antelación), su historial reciente, su ficha, sus grupos y los últimos avisos.
-  const SCHED_COLS = 'id, weekday, time, class_type_id, capacity, start_date, end_date, visible_days, color';
   async function loadClient() {
     const histFrom = dateKey(addDays(new Date(), -35));
     const [settings, plans, cts, sched, me, mine, anns, notifs] = await Promise.all([
       loadSettings(),
       fetchAll(() => sb.from('plans').select('*')),
       fetchAll(() => sb.from('class_types').select('*')),
-      fetchAll(() => sb.from('schedule').select(SCHED_COLS)),
+      sb.rpc('client_schedule').then(r => { if (r.error) throw r.error; return r.data || []; }),
       fetchAll(() => sb.from('members').select('*')),
       sb.rpc('my_bookings', { since: histFrom }).then(r => { if (r.error) throw r.error; return r.data; }),
       fetchAll(() => sb.from('announcements').select('*').order('date', { ascending: false }).limit(20)),
@@ -141,11 +142,11 @@
     const horizon = Math.max(Number(settings.bookWindowDays) || 7, ...sched.map(t => Number(t.visible_days) || 0)) + 2;
     const from = dateKey(weekStart(new Date())), to = dateKey(addDays(new Date(), horizon));
     const myId = me[0]?.id;
-    const [sessions, stats, myGroups] = await Promise.all([
+    const [sessions, stats] = await Promise.all([
       fetchAll(() => sb.from('sessions').select('*').gte('date', from).lte('date', to)),
       fetchAll(() => sb.from('session_stats').select('session_id, booked, waitlist, sessions!inner(date)').gte('sessions.date', from).lte('sessions.date', to)),
-      myId ? fetchAll(() => sb.from('schedule').select('id').contains('members', [myId])) : Promise.resolve([]),
     ]);
+    const myGroups = sched.filter(t => t.mine);
     // clases pasadas de su historial (solo las suyas)
     const inWin = new Set(sessions.map(s => s.id));
     const pastIds = [...new Set(mine.map(b => b.session_id).filter(id => !inWin.has(id)))];
@@ -157,10 +158,10 @@
       }
     }
     const mineSet = new Set(myGroups.map(g => g.id));
-    sched.forEach(t => { t.members = mineSet.has(t.id) && myId ? [myId] : []; });
+    sched.forEach(t => { t.members = mineSet.has(t.id) && myId ? [myId] : []; delete t.mine; });
     const sesIds = new Set(sessions.map(s => s.id));
     const bookings = mine.filter(b => sesIds.has(b.session_id)).map(b => ({ ...b, wait_position: b.wait_position }));
-    applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [], cashMoves: [], workouts: [], exercises: [], ptClients: [], ptSessions: [] });
+    applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [], cashMoves: [], workouts: [], exercises: [], ptClients: [], ptSessions: [], importLogs: [] });
     const st = Object.fromEntries(stats.map(x => [x.session_id, { booked: x.booked, waitlist: x.waitlist }]));
     db.sessions.forEach(s => s.stats = st[s.id] || { booked: 0, waitlist: 0 });
   }
@@ -178,6 +179,7 @@
   // Campos que la app espera aunque el servidor no los tenga
   function migrateServer() {
     db.users.forEach(u => { u.weekExtras = u.weekExtras || {}; });
+    if (db.settings && db.settings.importLog) delete db.settings.importLog;   // nunca en los ajustes: los lee cualquiera
     db.schedule.forEach(t => { t.members = t.members || []; });
   }
   const reload = () => enqueue(async () => { await flushNow(); role === 'admin' ? await loadAdmin() : await loadClient(); });
@@ -468,12 +470,11 @@
     if (session) { try { await afterSignIn(); } catch (e) { console.error(e); renderOffline(e.message); } }
     else renderLogin();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
-    // por si se pierde el tiempo real (móvil en reposo): refresco al volver a la app y cada 2 minutos
-    // Al volver a la app se recarga (si hace más de 20 s de la última vez); con la app abierta,
-    // un repaso cada 2 min (administrador) o 4 min (socios): lo demás llega solo por tiempo real.
+    // Por si se pierde el tiempo real (móvil en reposo): al volver a la app se recarga (si hace más de 20 s
+    // de la última vez) y, con la app abierta, un repaso cada 2 min (administrador) o 4 min (socios).
     let lastLoad = Date.now();
     const refresh = () => { lastLoad = Date.now(); return reload().then(liveRenderSafe); };
     document.addEventListener('visibilitychange', () => { if (!document.hidden && role && Date.now() - lastLoad > 20000) refresh(); });
-    setInterval(() => { if (role && !document.hidden && Date.now() - lastLoad > 60000) refresh(); }, role === 'admin' ? 120000 : 240000);
+    setInterval(() => { if (role && !document.hidden && Date.now() - lastLoad > (role === 'admin' ? 115000 : 235000)) refresh(); }, 30000);
   };
 })();
