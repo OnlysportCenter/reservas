@@ -33,6 +33,7 @@ const ICONS = {
   out: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   euro: '<path d="M17.5 6.5A7 7 0 1 0 17.5 17.5M4 10.5h9M4 13.5h9"/>',
+  menu: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   dumbbell: '<path d="M6.5 7v10M3.5 9.5v5M17.5 7v10M20.5 9.5v5M6.5 12h11"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -124,8 +125,18 @@ function render() {
         <button class="icon-btn" data-a="logout" aria-label="Salir" title="Cerrar sesión">${icon('out')}</button>
       </header>
       <main class="content">${(views[state.view] || views[nav[0][0]])()}</main>
-      <nav class="bottomnav">${nav.map(([v, ic, l]) => `<button class="${state.view === v ? 'active' : ''}" data-a="nav" data-v="${v}">${icon(ic)}<span>${l}</span></button>`).join('')}</nav>
+      <nav class="bottomnav">${nav.map(([v, ic, l]) => `<button class="${state.view === v ? 'active' : ''} ${u.role === 'admin' && !ADMIN_MAIN.includes(v) ? 'nav-extra' : ''}" data-a="nav" data-v="${v}">${icon(ic)}<span>${l}</span></button>`).join('')}
+        ${u.role === 'admin' ? (() => { const cur = nav.find(([v]) => v === state.view && !ADMIN_MAIN.includes(v));
+          return `<button class="nav-more ${cur ? 'active' : ''}" data-a="nav-more" aria-label="Más secciones">${icon(cur ? cur[1] : 'menu')}<span>${cur ? cur[2] : 'Más'}</span></button>`; })() : ''}</nav>
     </div>`;
+  ADMIN_NAV = nav;
+}
+// En el móvil el administrador ve 4 secciones abajo y el resto en «Más» (en el PC, todas en la barra lateral)
+const ADMIN_MAIN = ['a-today', 'a-agenda', 'a-clients', 'a-pay'];
+let ADMIN_NAV = [];
+function openNavMore() {
+  openModal(`${modalHead('Más secciones')}
+    <div class="nav-sheet">${ADMIN_NAV.filter(([v]) => !ADMIN_MAIN.includes(v)).map(([v, ic, l]) => `<button class="${state.view === v ? 'active' : ''}" data-a="nav-go" data-v="${v}">${icon(ic)}<span>${l}</span></button>`).join('')}</div>`, 'sheet');
 }
 
 // ---------- Login (prototipo) ----------
@@ -1258,6 +1269,8 @@ const actions = {
   'login-as': d => login(d.id),
   logout: () => logout(),
   nav: d => { state.view = d.v; if (d.v === 'c-book' || d.v === 'a-agenda') state.date = dateKey(new Date()); closeModal(); render(); window.scrollTo(0, 0); },
+  'nav-more': () => openNavMore(),
+  'nav-go': d => actions.nav(d),
   day: d => { state.date = d.k; render(); },
   close: () => closeModal(),
   bg: (d, el, e) => { if (e.target === el) closeModal(); },

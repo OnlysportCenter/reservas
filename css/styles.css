@@ -79,9 +79,17 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .bottomnav button svg { width: 22px; height: 22px; }
 .bottomnav button { min-width: 0; }
 .bottomnav button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shell.admin .bottomnav button { font-size: 9.5px; padding: 6px 0; }
+/* Panel en el móvil: 4 secciones + «Más» (el resto sale en una ventana). En el PC se ven todas en la barra lateral. */
+.shell.admin .bottomnav button { font-size: 12px; font-weight: 600; gap: 4px; padding: 7px 2px; }
+.shell.admin .bottomnav button svg { width: 25px; height: 25px; }
+.shell.admin .bottomnav .nav-extra { display: none; }
+.nav-sheet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-bottom: 6px; }
+.nav-sheet button { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 6px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.nav-sheet button svg { width: 28px; height: 28px; }
+.nav-sheet button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.modal.sheet { max-width: 520px; }
 /* App de los socios: los 4 botones de abajo, un poco más grandes y fáciles de pulsar */
-.shell.client { padding-bottom: 96px; }
+.shell.client, .shell.admin { padding-bottom: 96px; }
 .shell.client .bottomnav { padding-top: 8px; }
 .shell.client .bottomnav button { font-size: 12.5px; font-weight: 600; gap: 4px; padding: 7px 2px; }
 .shell.client .bottomnav button svg { width: 26px; height: 26px; }
@@ -95,6 +103,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
   }
   .shell.admin .bottomnav button { flex: 0; flex-direction: row; gap: 12px; font-size: 14px; padding: 10px 12px; justify-content: flex-start; }
   .shell.admin .bottomnav button.active { background: rgba(255,255,255,.07); }
+  .shell.admin .bottomnav button svg { width: 22px; height: 22px; }
+  .shell.admin .bottomnav .nav-extra { display: flex; }
+  .shell.admin .bottomnav .nav-more { display: none; }
   .shell.admin .topbar { margin-left: -220px; padding-left: 28px; z-index: 30; }
   .shell.admin .content { max-width: 1040px; padding: 24px; }
 }
