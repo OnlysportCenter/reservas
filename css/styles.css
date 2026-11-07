@@ -322,6 +322,15 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .pay-methods { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
 .pay-method { padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
 .pay-row { flex-wrap: wrap; }
+/* Buscador de clientes en la ventana de la clase */
+.cpick { margin-bottom: 6px; }
+.cpick-res { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 260px; overflow: auto; }
+.cpick-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--surface); border: 1px solid transparent; border-radius: 10px; padding: 7px 8px; font: inherit; color: var(--text); cursor: pointer; }
+.cpick-item:hover, .cpick-item.first { background: var(--surface-2); border-color: var(--border); }
+.cpick-hint { padding: 6px 4px; }
+.cpick-sel { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 8px 10px; border-radius: 12px; background: #E3F3E9; }
+[data-theme="dark"] .cpick-sel { background: rgba(31,122,69,.25); }
+.avatar.sm { width: 28px; height: 28px; font-size: 11px; flex: none; }
 /* Entrenamiento personal */
 .pt-head { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
 .pt-head .grow { min-width: 200px; }

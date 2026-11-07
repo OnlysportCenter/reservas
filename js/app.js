@@ -602,8 +602,12 @@ function openSession(id) {
       <div class="sx-side">
         ${!s.cancelled && !past ? `<div class="card">
           <b>Apuntar a un cliente</b>
-          <select class="search" style="margin:10px 0 6px" id="add-client-sel"><option value="">Elige cliente…</option>${free.filter(c => !c.isPlaceholder).map(c => `<option value="${c.id}">${esc(c.name)}${c.blocked ? ' (bloqueado)' : ''}</option>`).join('')}
-            ${free.some(c => c.isPlaceholder) ? `<optgroup label="🃏 Comodines">${free.filter(c => c.isPlaceholder).map(c => `<option value="${c.id}">🃏 ${esc(c.name)}</option>`).join('')}</optgroup>` : ''}</select>
+          <div class="cpick" data-cpick='${esc(JSON.stringify(free.filter(c => c.active !== false).sort((a, b) => (a.isPlaceholder ? 1 : 0) - (b.isPlaceholder ? 1 : 0) || a.name.localeCompare(b.name)).map(c => ({ id: c.id, n: c.name, s: norm2(c.name + ' ' + (c.phone || '') + ' ' + (c.email || '')), b: !!c.blocked, p: !!c.isPlaceholder, pl: getPlan(c.planId)?.name || '' }))))}'>
+            <input type="hidden" id="add-client-sel" value="">
+            <input class="search cpick-q" style="margin:10px 0 0" placeholder="🔍 Escribe el nombre del cliente…" autocomplete="off" data-cpick-q>
+            <div class="cpick-sel" hidden></div>
+            <div class="cpick-res"></div>
+          </div>
           <div class="small">${addNotify()}</div>
           <div class="stack" style="gap:8px"><button class="btn primary block" data-a="admin-book" data-id="${s.id}" data-m="auto">Apuntar a la clase</button>
             <button class="btn btn-wait block" data-a="admin-book" data-id="${s.id}" data-m="waitlist">Poner en lista de espera</button></div>
@@ -1660,6 +1664,45 @@ document.addEventListener('change', e => {
     updateSessionCapacity(e.target.dataset.id, v);
     openSession(e.target.dataset.id); render();
   }
+});
+
+// Buscador de clientes (ventana de la clase): se escribe y salen los que coinciden
+function cpickRender(box) {
+  const list = JSON.parse(box.dataset.cpick || '[]');
+  const q = norm2(box.querySelector('[data-cpick-q]').value).trim();
+  const res = box.querySelector('.cpick-res');
+  if (!q) { res.innerHTML = `<div class="muted small cpick-hint">${list.length} clientes se pueden apuntar. Escribe parte del nombre, apellido o teléfono.</div>`; return; }
+  const terms = q.split(/\s+/);
+  const hits = list.filter(c => terms.every(t => c.s.includes(t)));
+  res.innerHTML = hits.slice(0, 8).map((c, i) => `<button type="button" class="cpick-item ${i === 0 ? 'first' : ''}" data-a="cpick-choose" data-id="${c.id}">
+      <span class="avatar sm">${c.p ? '🃏' : esc(initials(c.n))}</span><span class="grow ellipsis"><b>${esc(c.n)}</b>${c.pl ? `<span class="muted small"> · ${esc(c.pl)}</span>` : ''}</span>
+      ${c.b ? '<span class="mtag danger">🔒 Bloqueado</span>' : ''}${c.p ? '<span class="mtag ph">Comodín</span>' : ''}</button>`).join('')
+    + (hits.length > 8 ? `<div class="muted small cpick-hint">… y ${hits.length - 8} más: sigue escribiendo</div>` : '')
+    + (!hits.length ? '<div class="muted small cpick-hint">Nadie coincide (o ya está apuntado a esta clase).</div>' : '');
+}
+function cpickChoose(box, id) {
+  const c = JSON.parse(box.dataset.cpick || '[]').find(x => x.id === id); if (!c) return;
+  box.querySelector('#add-client-sel').value = id;
+  const sel = box.querySelector('.cpick-sel');
+  sel.innerHTML = `<span class="avatar sm">${c.p ? '🃏' : esc(initials(c.n))}</span><b class="grow ellipsis">${esc(c.n)}</b><button type="button" class="btn sm ghost" data-a="cpick-clear" title="Elegir otro">Cambiar</button>`;
+  sel.hidden = false;
+  box.querySelector('[data-cpick-q]').hidden = true; box.querySelector('.cpick-res').innerHTML = '';
+}
+document.addEventListener('input', e => { if (e.target.matches?.('[data-cpick-q]')) cpickRender(e.target.closest('.cpick')); });
+document.addEventListener('focusin', e => { if (e.target.matches?.('[data-cpick-q]')) cpickRender(e.target.closest('.cpick')); });
+document.addEventListener('keydown', e => {
+  if (!e.target.matches?.('[data-cpick-q]')) return;
+  const box = e.target.closest('.cpick'), items = [...box.querySelectorAll('.cpick-item')];
+  if (e.key === 'Enter') { e.preventDefault(); const f = items.find(i => i.classList.contains('first')) || items[0]; if (f) cpickChoose(box, f.dataset.id); }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); if (!items.length) return;
+    let i = items.findIndex(x => x.classList.contains('first')); items[i]?.classList.remove('first');
+    i = (i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length; items[i].classList.add('first'); items[i].scrollIntoView({ block: 'nearest' });
+  }
+});
+Object.assign(actions, {
+  'cpick-choose': (d, el) => cpickChoose(el.closest('.cpick'), d.id),
+  'cpick-clear': (d, el) => { const box = el.closest('.cpick'); box.querySelector('#add-client-sel').value = ''; box.querySelector('.cpick-sel').hidden = true; const q = box.querySelector('[data-cpick-q]'); q.hidden = false; q.value = ''; q.focus(); },
 });
 
 // Se arranca cuando han cargado todos los scripts (marca, importación…)
