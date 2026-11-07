@@ -108,12 +108,12 @@ function render() {
   const unread = notificationsFor(u.id).filter(n => !n.read).length;
   if (u.role === 'client') announceNewNotifications(u.id, unread);
   const nav = u.role === 'admin'
-    ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-pay', 'euro', 'Pagos'], ['a-turns', 'clock', 'Turnos'], ['a-wk', 'dumbbell', 'Entrenos'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
+    ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-pay', 'euro', 'Pagos'], ['a-turns', 'clock', 'Turnos'], ['a-wk', 'dumbbell', 'Entrenos'], ['a-pt', 'user', 'Personal'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
     : [['c-book', 'cal', 'Reservar'], ['c-mine', 'check', 'Mis clases'], ['c-board', 'board', 'Tablón'], ['c-profile', 'user', 'Perfil']];
   const views = {
     'c-book': viewClientBook, 'c-mine': viewClientMine, 'c-board': viewBoard, 'c-profile': viewProfile,
     'a-today': viewAdminToday, 'a-agenda': viewAdminAgenda, 'a-clients': viewAdminClients, 'a-schedule': viewAdminSchedule,
-    'a-board': viewBoard, 'a-settings': viewAdminSettings, 'a-pay': () => viewAdminPayments(), 'a-turns': () => viewAdminTurns(), 'a-wk': () => viewAdminWorkouts(),
+    'a-board': viewBoard, 'a-settings': viewAdminSettings, 'a-pay': () => viewAdminPayments(), 'a-turns': () => viewAdminTurns(), 'a-wk': () => viewAdminWorkouts(), 'a-pt': () => viewAdminPersonal(),
   };
   $('#app').innerHTML = `
     <div class="shell ${u.role}">

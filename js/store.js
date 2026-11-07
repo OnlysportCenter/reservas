@@ -63,6 +63,8 @@ function migrate() {
   if (!db.cashMoves) { db.cashMoves = []; changed = true; }
   if (!db.workouts) { db.workouts = []; changed = true; }
   if (!db.exercises) { db.exercises = []; changed = true; }
+  if (!db.ptClients) { db.ptClients = []; changed = true; }
+  if (!db.ptSessions) { db.ptSessions = []; changed = true; }
   db.users.forEach(u => { if (u.planExpires) { u.planExpires = null; changed = true; } });   // ya no hay caducidad
   db.plans.forEach(p => { if (!p.type) { p.type = 'bono'; p.perWeek = null; changed = true; } });
   if (!db.plans.some(p => p.type === 'weekly')) {
