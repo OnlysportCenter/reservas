@@ -314,6 +314,13 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .pay-methods { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
 .pay-method { padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
 .pay-row { flex-wrap: wrap; }
+.bg-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.bg-day { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 1.5px solid var(--border); border-left: 5px solid var(--c, #2F5D8A); border-radius: 12px; cursor: pointer; background: var(--surface); }
+.bg-top { display: flex; align-items: center; gap: 8px; }
+.bg-day .bg-top input[type="checkbox"] { width: 18px !important; height: 18px; min-width: 0; margin: 0; padding: 0; flex: none; }
+.bg-day .bg-top b { white-space: nowrap; }
+.bg-day:has(input:checked) { border-color: var(--c, #2F5D8A); background: color-mix(in srgb, var(--c, #2F5D8A) 10%, var(--surface)); }
+.bg-day.over .muted { color: var(--warn); }
 .turn-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .turn-chips button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .turn-chips button span { display: inline-block; min-width: 20px; margin-left: 4px; padding: 0 6px; border-radius: 99px; background: var(--surface-2); color: var(--muted); font-size: 12px; text-align: center; }

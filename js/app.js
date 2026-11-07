@@ -821,6 +821,7 @@ function viewAdminClientsList(tabs = '') {
       <div class="row wrap" style="margin-top:8px">
         <button class="btn sm" data-a="bulk-paydue" ${state.sel.size ? '' : 'disabled'}>💶 Marcar cuota pendiente</button>
         <button class="btn sm ok" data-a="bulk-paid" ${state.sel.size ? '' : 'disabled'}>✅ Marcar como pagada</button>
+        <button class="btn sm primary" data-a="bulk-group" ${state.sel.size ? '' : 'disabled'}>👥 Meter en grupo</button>
         <button class="btn sm danger" data-a="bulk-delete" ${state.sel.size ? '' : 'disabled'} style="margin-left:auto">🗑 Borrar ${state.sel.size || ''}</button></div>
     </div>` : ''}
     <div class="card list">${list.length ? list.map(c => {
@@ -868,6 +869,35 @@ function openPlaceholderForm(id) {
       <div class="modal-actions"><button type="button" class="btn" data-a="close">Cancelar</button><button class="btn primary" type="submit">Guardar</button></div>
     </form>`);
 }
+
+// Meter a varios clientes seleccionados en un grupo fijo: se elige la hora y los días (L-X-V 9:15…)
+function openBulkGroup() {
+  const n = state.sel.size;
+  const times = [...new Set(db.schedule.map(t => t.time))].sort();
+  if (!times.length) return toast('Primero crea los horarios en Clases', 'err');
+  const time = times.includes(state.bgTime) ? state.bgTime : times[0];
+  state.bgTime = time;
+  const ord = w => (w + 6) % 7;
+  const slots = db.schedule.filter(t => t.time === time && getClassType(t.classTypeId)).sort((a, b) => ord(a.weekday) - ord(b.weekday));
+  const ids = [...state.sel];
+  openModal(`${modalHead(`👥 Meter ${n} ${n === 1 ? 'cliente' : 'clientes'} en un grupo`)}
+    <div class="field"><label>Hora del turno</label>
+      <select data-change="bulk-group-time">${times.map(x => `<option ${x === time ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label>Días (marca los del grupo, p. ej. L-X-V)</label>
+      <div class="bg-days">${slots.map(t => {
+        const ct = getClassType(t.classTypeId), cap = slotCapacity(t), now = t.members.length;
+        const extra = ids.filter(id => !t.members.includes(id)).length;
+        const over = now + extra > cap;
+        return `<label class="bg-day ${over ? 'over' : ''}" style="--c:${slotColor(t)}"><span class="bg-top"><input type="checkbox" name="bg-slot" value="${t.id}"><b>${DOW_LONG[t.weekday]}</b></span>
+          <span class="small">${esc(ct.name)}</span><span class="muted small">👥 ${now}/${cap}${extra ? ` → ${now + extra}` : ''}${over ? ' · ⚠️ supera el aforo' : ''}</span></label>`;
+      }).join('') || '<div class="muted small">No hay horarios a esa hora.</div>'}</div></div>
+    <p class="muted small" style="margin:-4px 0 10px">Se les reservan ya las próximas clases de esos días y, a partir de ahí, todas las semanas. Los que ya estén en el grupo se quedan igual.</p>
+    <div class="small">${addNotify(false, false)}</div>
+    <div class="modal-actions"><button class="btn" data-a="close">Cancelar</button><button class="btn primary" data-a="bulk-group-ok">Meter en el grupo</button></div>`);
+}
+document.addEventListener('change', e => {
+  if (e.target.dataset?.change === 'bulk-group-time') { state.bgTime = e.target.value; openBulkGroup(); }
+});
 
 function openClient(id) {
   if (getUser(id)?.isPlaceholder) return openPlaceholder(getUser(id));
@@ -1319,6 +1349,20 @@ const actions = {
       ${notifyChecks(false, true)}
       <div class="modal-actions"><button class="btn" data-a="close">Volver</button><button class="btn primary" data-a="bulk-paydue-ok">Marcar cuota pendiente</button></div>`),
   'bulk-paydue-ok': () => { const nt = readNotify(); state.sel.forEach(id => markPaymentDue(id, nt)); toast(`Aviso enviado a ${state.sel.size} cliente(s)`, 'ok'); state.sel.clear(); closeModal(); render(); },
+  'bulk-group': () => openBulkGroup(),
+  'bulk-group-ok': () => {
+    const slots = [...document.querySelectorAll('input[name="bg-slot"]:checked')].map(x => x.value);
+    if (!slots.length) return toast('Marca al menos un día', 'err');
+    const nt = readNotify();
+    let added = 0, reserved = 0;
+    slots.forEach(sid => state.sel.forEach(uid_ => {
+      const t = getSlot(sid);
+      if (!t || t.members.includes(uid_) || getUser(uid_)?.role !== 'client') return;
+      reserved += addGroupMember(sid, uid_, nt); added++;
+    }));
+    toast(`👥 ${state.sel.size} cliente(s) metidos en el grupo · ${reserved} clase(s) reservadas`, 'ok');
+    state.sel.clear(); closeModal(); render();
+  },
   'bulk-delete': () => {
     const n = state.sel.size; if (!n) return;
     const names = [...state.sel].map(getUser).filter(Boolean).map(u => esc(u.name));
