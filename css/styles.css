@@ -158,7 +158,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .cap .bar i { display: block; height: 100%; background: var(--c, var(--accent)); border-radius: 99px; }
 .cap .bar i.full { background: var(--danger); }
 
-.spots { margin-top: 6px; font-size: 14px; font-weight: 600; color: var(--ok); }
+.spots { margin-top: 6px; font-size: 15px; font-weight: 600; color: var(--ok); line-height: 1.2; white-space: nowrap; }
+.spots .spots-n { font-family: var(--f-display); font-size: 24px; font-weight: 800; margin-right: 2px; vertical-align: -2px; }
+.spots.full { font-size: 17px; font-weight: 700; }
 .spots.few { color: var(--warn); }
 .spots.full { color: var(--danger); }
 .wl-pos { margin-top: 6px; font-size: 13px; background: var(--warn-bg); color: var(--warn); padding: 5px 9px; border-radius: 8px; display: inline-block; }
@@ -205,7 +207,8 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .session.is-booked .time { background: color-mix(in srgb, var(--ok) 16%, transparent); }
 .session.is-booked .booked-pill, .session.is-booked .pill.ok { background: var(--ok); color: #fff; }
 .session { flex-wrap: wrap; }
-.session .info { flex: 1 1 0; }
+.session .info { flex: 1 1 0; min-width: 150px; }
+.session .act { margin-left: auto; }
 .session .time { align-self: flex-start; }
 .session .act { flex: 0 0 auto; }
 .session-extra { flex-basis: 100%; padding-left: 80px; margin-top: -4px; }
@@ -213,6 +216,11 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .btn-big { padding: 11px 18px; font-size: 15px; border-radius: 12px; min-width: 112px; min-height: 44px; }
 .btn-big.danger { background: var(--danger-bg); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); }
 @media (max-width: 420px) { .btn-big { min-width: 100px; padding: 10px 14px; } }
+/* Lista de espera en naranja (verde = reservada, naranja = espera, rojo = cancelar) */
+.btn-wait { background: #E8890C; border-color: #E8890C; color: #fff; }
+.btn-wait:hover { background: #D07A08; filter: none; }
+.btn-wait-out { background: transparent; border: 1.5px solid #E8890C; color: #B86A06; }
+:root[data-theme="dark"] .btn-wait-out { color: #F4A84A; }
 .bulk-bar { position: sticky; top: 60px; z-index: 10; margin-bottom: 10px; border-color: var(--accent); }
 .dropzone { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 28px 16px; border: 2px dashed var(--border); border-radius: 14px; cursor: pointer; text-align: center; }
 .dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--surface-2); }

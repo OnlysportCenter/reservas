@@ -173,7 +173,7 @@ function clientDaysAhead() {
 function spotsInfo(s) {
   const f = freeSpots(s);
   if (f <= 0) return '<div class="spots full">Completa</div>';
-  return `<div class="spots ${f <= 2 ? 'few' : ''}">${f} ${f === 1 ? 'plaza libre' : 'plazas libres'}</div>`;
+  return `<div class="spots ${f <= 2 ? 'few' : ''}"><b class="spots-n">${f}</b> ${f === 1 ? 'plaza libre' : 'plazas libres'}</div>`;
 }
 // Etiqueta de clases disponibles (semana del día seleccionado para tarifas semanales)
 function weekInfo(u) {
@@ -235,16 +235,16 @@ function viewClientBook() {
         if (s.cancelled) act = '<span class="pill danger">Cancelada</span>';
         else if (b?.status === 'booked') act = `<span class="pill ok booked-pill">✓ Reservada</span>${!started ? `<button class="btn btn-big danger" data-a="cancel-booking" data-id="${b.id}">Cancelar</button>` : ''}`;
         else if (b?.status === 'waitlist') {
-          act = `<button class="btn btn-big" data-a="cancel-booking" data-id="${b.id}">Salir de la lista</button>`;
+          act = `<button class="btn btn-big btn-wait-out" data-a="cancel-booking" data-id="${b.id}">Salir de la lista</button>`;
           extra = `<div class="wl-pos">En lista de espera · vas el <b>nº ${waitlistPosition(b)}</b></div>`;
           if (!canUseFor(u, s).ok) extra += `<div class="muted small" style="margin-top:4px">Entrarás en cuanto te quites de otra clase ${db.settings.onePerDay && db.bookings.some(x => x.userId === u.id && x.status === 'booked' && getSession(x.sessionId)?.date === s.date) ? 'de ese día' : 'de esa semana'}.</div>`;
         }
         else if (started) act = '<span class="pill">Finalizada</span>';
         else if (ps.blocked) act = '<span class="pill">Bloqueado</span>';
-        else if (full) act = db.settings.waitlistEnabled ? `<button class="btn btn-big" data-a="book" data-id="${s.id}">Lista de espera</button>` : '';
+        else if (full) act = db.settings.waitlistEnabled ? `<button class="btn btn-big btn-wait" data-a="book" data-id="${s.id}">Lista de espera</button>` : '';
         else if (ps.ok && !canUseFor(u, s).ok) {
           // ya tiene sus clases (semana completa u otra clase ese día): puede esperar aquí sin gastar clase
-          act = db.settings.waitlistEnabled ? `<button class="btn btn-big" data-a="book" data-id="${s.id}">Apuntarme en espera</button>` : '';
+          act = db.settings.waitlistEnabled ? `<button class="btn btn-big btn-wait" data-a="book" data-id="${s.id}">Apuntarme en espera</button>` : '';
           extra = `<div class="muted small" style="margin-top:4px">Ya tienes tus clases ${/ese día/.test(canUseFor(u, s).msg) ? 'de ese día' : 'de esta semana'}. Si te apuntas, entrarás cuando te quites de otra.</div>`;
         }
         else act = `<button class="btn btn-big primary" data-a="book" data-id="${s.id}">Reservar</button>`;
