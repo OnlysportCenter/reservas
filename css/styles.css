@@ -65,7 +65,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .badge { position: absolute; top: 0; right: 0; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; min-width: 17px; height: 17px; border-radius: 99px; display: grid; place-items: center; padding: 0 4px; }
 
 .content { max-width: 760px; margin: 0 auto; padding: 16px; }
-.page-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
+.page-title { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 4px 0 14px; flex-wrap: wrap; }
 .page-title h1 { font-size: 22px; }
 
 .bottomnav {
@@ -77,6 +77,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
   font-size: 11px; padding: 6px 2px; border-radius: 10px;
 }
 .bottomnav button svg { width: 22px; height: 22px; }
+.bottomnav button { min-width: 0; }
+.bottomnav button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell.admin .bottomnav button { font-size: 9.5px; padding: 6px 0; }
 .bottomnav button.active { color: #fff; }
 .bottomnav button.active svg { color: var(--nav-accent); }
 
@@ -314,6 +317,44 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .pay-methods { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
 .pay-method { padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
 .pay-row { flex-wrap: wrap; }
+/* Entrenamiento de la semana */
+.wk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; align-items: start; }
+.wk-card.empty-slot { text-align: center; padding: 28px 16px; border-style: dashed; }
+.wk-head { display: flex; gap: 12px; align-items: flex-start; }
+.wk-num { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-family: var(--f-display); font-weight: 800; font-size: 18px; flex: none; margin: 0 auto; }
+.wk-head .wk-num { margin: 0; }
+.wk-title { font-family: var(--f-display); font-size: 18px; font-weight: 800; }
+.wk-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 13px; color: var(--muted); margin-top: 4px; }
+.wk-meta b { color: var(--text); }
+.wk-rep { margin-top: 10px; padding: 7px 10px; border-radius: 10px; background: var(--warn-bg); font-size: 13px; }
+.wk-ex { margin: 12px 0 0; padding-left: 24px; line-height: 1.7; font-size: 14.5px; }
+.wk-ex li.rep b { color: var(--warn); }
+.wk-notes { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13.5px; line-height: 1.5; }
+.wk-top { display: flex; flex-wrap: wrap; gap: 6px; }
+.wk-top span { padding: 5px 10px; border-radius: 99px; background: var(--surface-2); font-size: 13px; }
+.wk-top span.warm { background: var(--warn-bg); }
+.wk-top span.hot { background: var(--danger-bg); color: var(--danger); }
+.wk-lib { margin-top: 10px; max-height: 320px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 14px; }
+.wk-lib-i { display: flex; align-items: center; gap: 8px; padding: 6px 2px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.wk-times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+@media (max-width: 640px) { .wk-times { grid-template-columns: 1fr; } }
+.wk-presets { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.wk-presets button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; padding: 3px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.wk-presets button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.wk-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.wk-row { display: grid; grid-template-columns: 24px minmax(160px, 2fr) minmax(120px, 1.3fr) auto auto; gap: 6px; align-items: center; }
+.wk-row .search { margin: 0; }
+.wk-row .n { text-align: right; color: var(--muted); font-size: 13px; }
+.wk-row-btns { display: flex; }
+.wk-tag .mtag { white-space: nowrap; }
+.mtag.ok { background: #E3F3E9; color: #1F7A45; }
+@media (max-width: 640px) { .wk-row { grid-template-columns: 22px 1fr auto; } .wk-row .det { grid-column: 2 / 4; } .wk-row .wk-tag { grid-column: 2 / 3; } }
+.wk-pick { margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--surface-2); }
+.wk-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 190px; overflow: auto; }
+.wk-chips button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 99px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.wk-chips button:hover:not(:disabled) { border-color: var(--accent); }
+.wk-chips button.warn { background: var(--warn-bg); border-color: transparent; }
+.wk-chips button.used { opacity: .4; cursor: default; text-decoration: line-through; }
 /* Turnos */
 .turn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; align-items: start; }
 .turn-card { border-top: 5px solid var(--c, #2F5D8A); }
@@ -506,7 +547,8 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 /* Personalización (Ajustes) */
 .swatch-btn { width: 32px; height: 32px; border-radius: 99px; background: var(--c); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--border); padding: 0; }
 .swatch-btn.on { box-shadow: 0 0 0 2px var(--text); }
-.tab-radio input { position: absolute; opacity: 0; pointer-events: none; }
+.tab-radio { position: relative; }
+.tab-radio input { position: absolute; opacity: 0; pointer-events: none; width: 1px !important; height: 1px; margin: 0; padding: 0; left: 0; top: 0; }
 .tab-radio span { display: inline-block; border: 1px solid var(--border); background: var(--surface); padding: 7px 14px; border-radius: 99px; font-weight: 600; font-size: 13px; cursor: pointer; }
 .tab-radio input[type="checkbox"]:not(:checked) + span { text-decoration: line-through; opacity: .55; }
 .tab-radio input:checked + span { background: var(--text); color: var(--surface); border-color: var(--text); }

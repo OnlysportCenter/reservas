@@ -44,6 +44,8 @@
     users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '' } },
     payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', created_at: NOW } },
     cashMoves: { db: 'cash_moves', cols: { id: null, date: null, concept: '', method: 'Efectivo', base: 0, iva: false, amount: 0, created_at: NOW } },
+    workouts: { db: 'workouts', cols: { id: null, week_start: null, position: 1, title: '', rounds: null, work_secs: null, rest_secs: null, notes: '', exercises: [], created_at: NOW } },
+    exercises: { db: 'exercises', cols: { id: null, name: '', created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
     sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false } },
     bookings: { db: 'bookings', cols: { id: null, session_id: null, user_id: null, status: 'booked', source: null, created_at: NOW, reminded: false, block_removed: false, group_removed: false } },
@@ -51,8 +53,8 @@
     notifications: { db: 'notifications', cols: { id: null, user_id: null, text: '', type: 'info', date: NOW, read: false } },
     emails: { db: 'emails', cols: { id: null, user_id: null, to_email: '', subject: '', body: '', date: NOW, sent_at: null, error: null } },
   };
-  const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments', 'cashMoves'];
-  const TS = new Set(['cash_moves.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
+  const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments', 'cashMoves', 'exercises', 'workouts'];
+  const TS = new Set(['cash_moves.created_at', 'workouts.created_at', 'exercises.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
   const toCamel = s => s === 'to_email' ? 'to' : s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
   const toJS = (t, row) => {
     const o = {};
@@ -68,6 +70,7 @@
       if (v === undefined) v = typeof def === 'function' ? def() : def;
       if (col === 'price' || col === 'capacity' || col === 'duration' || col === 'visible_days' || col === 'fee') v = (v === null || v === '' || v === undefined) ? null : Number(v);
       if (col === 'base' || col === 'total' || col === 'amount') v = Number(v) || 0;
+      if (col === 'rounds' || col === 'work_secs' || col === 'rest_secs' || col === 'position') v = (v === null || v === '' || v === undefined || isNaN(Number(v))) ? (col === 'position' ? 1 : null) : Math.round(Number(v));
       if (col === 'paid_at' && v === '') v = null;
       if ((col === 'start_date' || col === 'end_date') && v === '') v = null;
       r[col] = v;
@@ -94,7 +97,7 @@
   }
   async function loadAdmin() {
     const from = dateKey(addDays(new Date(), -60));
-    const [settings, plans, cts, sched, members, sessions, bookings, anns, notifs, emails, prospects, payments, cashMoves] = await Promise.all([
+    const [settings, plans, cts, sched, members, sessions, bookings, anns, notifs, emails, prospects, payments, cashMoves, workouts, exercises] = await Promise.all([
       loadSettings(),
       fetchAll(() => sb.from('plans').select('*').order('id')),
       fetchAll(() => sb.from('class_types').select('*').order('id')),
@@ -108,9 +111,11 @@
       fetchAll(() => sb.from('prospects').select('*').order('id')),
       fetchAll(() => sb.from('payments').select('*').order('id')),
       fetchAll(() => sb.from('cash_moves').select('*').order('id')),
+      fetchAll(() => sb.from('workouts').select('*').order('id')),
+      fetchAll(() => sb.from('exercises').select('*').order('id')),
     ]);
     bookings.forEach(b => delete b.sessions);
-    const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects, payments, cashMoves };
+    const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects, payments, cashMoves, workouts, exercises };
     applyLoaded(settings, raw);
   }
   // El socio solo descarga lo que usa: las clases que puede ver (desde el lunes de esta semana hasta
@@ -151,7 +156,7 @@
     sched.forEach(t => { t.members = mineSet.has(t.id) && myId ? [myId] : []; });
     const sesIds = new Set(sessions.map(s => s.id));
     const bookings = mine.filter(b => sesIds.has(b.session_id)).map(b => ({ ...b, wait_position: b.wait_position }));
-    applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [], cashMoves: [] });
+    applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [], cashMoves: [], workouts: [], exercises: [] });
     const st = Object.fromEntries(stats.map(x => [x.session_id, { booked: x.booked, waitlist: x.waitlist }]));
     db.sessions.forEach(s => s.stats = st[s.id] || { booked: 0, waitlist: 0 });
   }

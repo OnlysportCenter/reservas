@@ -33,6 +33,7 @@ const ICONS = {
   out: '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   euro: '<path d="M17.5 6.5A7 7 0 1 0 17.5 17.5M4 10.5h9M4 13.5h9"/>',
+  dumbbell: '<path d="M6.5 7v10M3.5 9.5v5M17.5 7v10M20.5 9.5v5M6.5 12h11"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/>',
@@ -107,12 +108,12 @@ function render() {
   const unread = notificationsFor(u.id).filter(n => !n.read).length;
   if (u.role === 'client') announceNewNotifications(u.id, unread);
   const nav = u.role === 'admin'
-    ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-pay', 'euro', 'Pagos'], ['a-turns', 'clock', 'Turnos'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
+    ? [['a-today', 'home', 'Hoy'], ['a-agenda', 'cal', 'Agenda'], ['a-clients', 'users', 'Clientes'], ['a-pay', 'euro', 'Pagos'], ['a-turns', 'clock', 'Turnos'], ['a-wk', 'dumbbell', 'Entrenos'], ['a-schedule', 'grid', 'Clases'], ['a-board', 'board', 'Tablón'], ['a-settings', 'gear', 'Ajustes']]
     : [['c-book', 'cal', 'Reservar'], ['c-mine', 'check', 'Mis clases'], ['c-board', 'board', 'Tablón'], ['c-profile', 'user', 'Perfil']];
   const views = {
     'c-book': viewClientBook, 'c-mine': viewClientMine, 'c-board': viewBoard, 'c-profile': viewProfile,
     'a-today': viewAdminToday, 'a-agenda': viewAdminAgenda, 'a-clients': viewAdminClients, 'a-schedule': viewAdminSchedule,
-    'a-board': viewBoard, 'a-settings': viewAdminSettings, 'a-pay': () => viewAdminPayments(), 'a-turns': () => viewAdminTurns(),
+    'a-board': viewBoard, 'a-settings': viewAdminSettings, 'a-pay': () => viewAdminPayments(), 'a-turns': () => viewAdminTurns(), 'a-wk': () => viewAdminWorkouts(),
   };
   $('#app').innerHTML = `
     <div class="shell ${u.role}">
