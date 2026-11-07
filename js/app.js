@@ -142,17 +142,46 @@ function renderLogin() {
 }
 
 // ---------- Componentes comunes ----------
+// Días de la semana que no ven los socios (Ajustes), p. ej. [6, 0] = sábado y domingo
+const hiddenWeekdays = () => (db.settings.hiddenWeekdays || []).map(Number);
+const clientDayHidden = d => !isAdmin() && hiddenWeekdays().includes(d.getDay());
+// Si el día elegido está oculto para el socio, pasa al siguiente día visible
+function fixClientDate(maxOffset) {
+  const today = startOfDay(new Date());
+  for (let i = 0; i <= maxOffset; i++) {
+    const d = addDays(parseKey(state.date), i);
+    if (d - today > maxOffset * 86400000) break;
+    if (!clientDayHidden(d)) { state.date = dateKey(d); return; }
+  }
+}
+// Tira de días (arriba de la pantalla de reservas y de la agenda)
 function dayStrip(fromOffset, toOffset) {
   const today = startOfDay(new Date());
-  let html = '<div class="daystrip">';
+  const sel = parseKey(state.date);
+  let html = '';
   for (let i = fromOffset; i <= toOffset; i++) {
     const d = addDays(today, i), k = dateKey(d);
+    if (clientDayHidden(d)) continue;
     const has = sessionsOn(k).some(s => !s.cancelled);
     const mine = !isAdmin() && sessionsOn(k).some(s => { const b = userBookingIn(state.userId, s.id); return b && b.status === 'booked'; });
-    html += `<button class="day ${k === state.date ? 'active' : ''} ${i < 0 ? 'past' : ''}" data-a="day" data-k="${k}">
-      <span class="dw">${i === 0 ? 'Hoy' : DOW[d.getDay()]}</span><span class="dn">${d.getDate()}</span><span class="dot ${mine || (isAdmin() && has) ? 'on' : ''}"></span></button>`;
+    const wait = !isAdmin() && sessionsOn(k).some(s => userBookingIn(state.userId, s.id)?.status === 'waitlist');
+    const newMonth = d.getDate() === 1 && i !== fromOffset;
+    html += `${newMonth ? `<span class="dmonth">${MONTHS[d.getMonth()]}</span>` : ''}<button class="dchip ${k === state.date ? 'active' : ''} ${i === 0 ? 'today' : ''} ${i < 0 ? 'past' : ''}" data-a="day" data-k="${k}">
+      <span class="dw">${i === 0 ? 'Hoy' : DOW[d.getDay()]}</span><span class="dn">${d.getDate()}</span>
+      <span class="ddots">${mine ? '<i class="ok"></i>' : ''}${wait ? '<i class="wait"></i>' : ''}${isAdmin() && has ? '<i></i>' : ''}</span></button>`;
   }
-  return html + '</div>';
+  const monthLabel = `${MONTHS_FULL_UI[sel.getMonth()]} ${sel.getFullYear()}`;
+  return `<div class="calstrip">
+    <div class="calstrip-head"><b>${monthLabel}</b>${!isAdmin() ? '<span class="calstrip-legend"><i class="ok"></i>tu clase<i class="wait"></i>en espera</span>' : ''}</div>
+    <div class="daystrip">${html}</div></div>`;
+}
+const MONTHS_FULL_UI = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+// «Lunes 9 de noviembre» (+ Hoy / Mañana)
+function dayTitle(key) {
+  const d = parseKey(key), today = startOfDay(new Date());
+  const diff = Math.round((d - today) / 86400000);
+  const tag = diff === 0 ? 'Hoy' : diff === 1 ? 'Mañana' : '';
+  return `<h2 class="day-title">${DOW_LONG[d.getDay()]} ${d.getDate()} de ${MONTHS_FULL_UI[d.getMonth()].toLowerCase()}${tag ? ` <span class="day-tag">${tag}</span>` : ''}</h2>`;
 }
 function capBar(s) {
   const n = bookedIn(s.id).length, pct = Math.min(100, Math.round(n / s.capacity * 100));
@@ -212,7 +241,8 @@ function paymentBanner(u) {
 function viewClientBook() {
   const u = me();
   const ahead = clientDaysAhead();
-  if (state.date > dateKey(addDays(new Date(), ahead))) state.date = dateKey(new Date());
+  if (state.date > dateKey(addDays(new Date(), ahead)) || state.date < dateKey(new Date())) state.date = dateKey(new Date());
+  fixClientDate(ahead);
   const list = sessionsOn(state.date).filter(isVisibleToClients);
   const ps = planStatus(u);
   const now = new Date();
@@ -224,7 +254,7 @@ function viewClientBook() {
     ${(() => { const w = db.bookings.filter(b => b.userId === u.id && b.status === 'waitlist' && sessionStart(getSession(b.sessionId)) > now).length;
       return w ? `<div class="card small" style="background:var(--warn-bg);border-color:transparent;margin-bottom:12px">⏳ Estás en lista de espera en <b>${w}</b> ${w === 1 ? 'clase' : 'clases'}. Entrarás en la primera que se libere${isWeekly(u) ? ' y, si con ella completas tus clases de la semana, te quitaremos de las demás' : ''}.</div>` : ''; })()}
     ${dayStrip(0, ahead)}
-    <div class="section-h">${fmtDateLong(state.date)}</div>
+    ${dayTitle(state.date)}
     <div class="stack">
       ${list.length ? list.map(s => {
         const ct = getClassType(s.classTypeId);
@@ -248,11 +278,11 @@ function viewClientBook() {
           extra = `<div class="muted small" style="margin-top:4px">Ya tienes tus clases ${/ese día/.test(canUseFor(u, s).msg) ? 'de ese día' : 'de esta semana'}. Si te apuntas, entrarás cuando te quites de otra.</div>`;
         }
         else act = `<button class="btn btn-big primary" data-a="book" data-id="${s.id}">Reservar</button>`;
-        return `<div class="card session ${s.cancelled ? 'cancelled' : ''} ${b?.status === 'booked' && !s.cancelled ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
+        return `<div class="card session client-session ${s.cancelled ? 'cancelled' : ''} ${b?.status === 'booked' && !s.cancelled ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
           <div class="info"><div class="name">${esc(ct.name)}</div>${s.cancelled ? '' : spotsInfo(s)}</div>
-          <div class="act">${act}</div>
-          ${extra ? `<div class="session-extra">${extra}</div>` : ''}</div>`;
+          ${extra ? `<div class="session-extra">${extra}</div>` : ''}
+          ${act ? `<div class="act">${act}</div>` : ''}</div>`;
       }).join('') : `<div class="empty">${icon('cal')}<div>No hay clases este día.</div></div>`}
     </div>
     <p class="muted small" style="text-align:center;margin-top:16px">${esc(publishDescription())}</p>`;
@@ -274,7 +304,7 @@ function viewClientMine() {
       ${items.length ? items.map(({ b, s }) => {
         const ct = getClassType(s.classTypeId);
         const canCancel = state.mineTab === 'next' && sessionStart(s) > now;
-        return `<div class="card session ${b.status === 'booked' || b.status === 'attended' ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
+        return `<div class="card session client-session ${b.status === 'booked' || b.status === 'attended' ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${fmtDateShort(s.date)}</div></div>
           <div class="info"><div class="name">${esc(ct.name)}</div><div class="meta">${s.duration} min</div>
             ${canCancel && b.status === 'booked' && isLateCancel(s) ? `<div class="small" style="color:var(--warn);margin-top:4px">Fuera de plazo de cancelación gratuita</div>` : ''}</div>
@@ -337,6 +367,13 @@ function viewProfile() {
       · Cancela con al menos ${db.settings.cancelHours} h de antelación para recuperar la clase.<br>
       · Si una clase está llena, apúntate a la lista de espera: entrarás automáticamente si alguien cancela.<br>
       · Te enviaremos un recordatorio ${db.settings.reminderHours} h antes de la clase.
+    </div>
+    <div class="card" style="margin-top:12px">
+      <b>Apariencia</b> <span class="muted small">· solo en este móvil</span>
+      <div class="theme-pick">${[['light', '☀️', 'Claro'], ['dark', '🌙', 'Oscuro'], ['auto', '📱', 'Según el móvil']].map(([v, ic, l]) => {
+        const cur = themePref() || brand().theme;
+        return `<button class="${cur === v ? 'on' : ''}" data-a="theme-pref" data-v="${v}"><span>${ic}</span>${l}</button>`;
+      }).join('')}</div>
     </div>
     <button class="btn block" style="margin-top:16px" data-a="logout">${icon('out', 'width="18" height="18"')}Cerrar sesión</button>
     <p style="text-align:center;margin-top:14px"><button class="legal-link" data-a="privacy">Privacidad y tus datos</button></p>`;
@@ -479,7 +516,7 @@ function viewAdminAgenda() {
   return `
     <div class="page-title"><h1>Agenda</h1><button class="btn primary" data-a="extra-session">${icon('plus', 'width="18" height="18"')}Clase extra</button></div>
     ${dayStrip(-7, db.settings.bookWindowDays + 7)}
-    <div class="section-h">${fmtDateLong(state.date)}</div>
+    ${dayTitle(state.date)}
     <div class="stack">${list.length ? list.map(adminSessionCard).join('') : '<div class="card empty">No hay clases este día.</div>'}</div>`;
 }
 
@@ -997,6 +1034,9 @@ function viewAdminSettings() {
         <div class="field"><label>Máximo en lista de espera</label><input name="waitlistMax" type="number" min="1" max="50" value="${s.waitlistMax}"></div>
       </div>
       <label class="check"><input type="checkbox" name="onePerDay" ${s.onePerDay ? 'checked' : ''}> Máximo una clase al día por cliente</label>
+      <div class="field"><label>Días que aparecen en la app de los socios</label>
+        <div class="row wrap">${[1, 2, 3, 4, 5, 6, 0].map(w => `<label class="tab-radio"><input type="checkbox" name="showDay" value="${w}" ${(s.hiddenWeekdays || []).map(Number).includes(w) ? '' : 'checked'}><span>${DOW[w]}</span></label>`).join('')}</div>
+        <p class="muted small" style="margin:6px 0 0">Desmarca sábado y domingo si no hay clases, para que el calendario de los socios no quede tan cargado. Tú los sigues viendo.</p></div>
       <label class="check"><input type="checkbox" name="waitlistEnabled" ${s.waitlistEnabled ? 'checked' : ''}> Activar lista de espera automática</label>
       <label class="check"><input type="checkbox" name="emailOnPromote" ${s.emailOnPromote ? 'checked' : ''}> ✉️ Enviar correo cuando alguien entra desde la lista de espera (la notificación en la app se envía siempre)</label>
 
@@ -1070,6 +1110,7 @@ const actions = {
   notifs: () => { document.querySelector('.notif-banner')?.remove(); openNotifications(); render(); },
   'mine-tab': d => { state.mineTab = d.t; render(); },
   privacy: () => openPrivacy(),
+  'theme-pref': d => { setThemePref(d.v); render(); },
   'notif-clear': async (d, el) => { el.disabled = true; await deleteReadNotifications(state.userId); openNotifications(); render(); toast('Notificaciones leídas borradas', 'ok'); },
   'notif-del': async d => { await deleteNotification(d.id); openNotifications(); render(); },
   'pay-answer': async (d, el) => {
@@ -1353,6 +1394,7 @@ const forms = {
       reminderHours: Number(f.get('reminderHours')), waitlistMax: Number(f.get('waitlistMax')), waitlistEnabled: f.get('waitlistEnabled') === 'on',
       publishMode: f.get('publishMode'), publishWeekday: Number(f.get('publishWeekday')), publishTime: f.get('publishTime') || '20:00',
       weeklyLimit: Number(f.get('weeklyLimit')), emailOnPromote: f.get('emailOnPromote') === 'on', onePerDay: f.get('onePerDay') === 'on',
+      hiddenWeekdays: [0, 1, 2, 3, 4, 5, 6].filter(w => !f.getAll('showDay').map(Number).includes(w)),
       autoMonthlyDue: f.get('autoMonthlyDue') === 'on', autoMonthlyDay: Math.min(28, Math.max(1, Number(f.get('autoMonthlyDay')) || 1)), autoMonthlyEmail: f.get('autoMonthlyEmail') === 'on',
     });
     saveDB();

@@ -22,9 +22,15 @@ const inkOn = h => luminance(h) > 0.45 ? '#0E0E0D' : '#FFFFFF';
 function mix(h1, h2, t) { const a = hexToRgb(h1), b = hexToRgb(h2); return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join(''); }
 
 // ---------- Aplicar la marca a la página ----------
+// Preferencia de cada persona en su móvil (Claro / Oscuro / Según el móvil). Manda sobre la del centro.
+const THEME_KEY = 'onlysport-theme';
+function themePref() { try { const v = localStorage.getItem(THEME_KEY); return ['light', 'dark', 'auto'].includes(v) ? v : null; } catch (e) { return null; } }
+function setThemePref(v) { try { v ? localStorage.setItem(THEME_KEY, v) : localStorage.removeItem(THEME_KEY); } catch (e) {} applyBrand(); }
+const effectiveTheme = b => themePref() || b.theme;
 function applyBrand(b = brand()) {
   const root = document.documentElement;
-  const dark = b.theme === 'dark' || (b.theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const mode = effectiveTheme(b);
+  const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
   root.dataset.theme = dark ? 'dark' : 'light';
   // en modo oscuro un color muy oscuro no se vería: se usa el blanco hueso
   const accent = dark && luminance(b.primary) < 0.06 ? '#F3F1EC' : b.primary;
@@ -38,7 +44,7 @@ function applyBrand(b = brand()) {
   if (fav) fav.href = b.logo || 'icons/icon-192.png';
   if (db?.settings?.centerName) document.title = db.settings.centerName;
 }
-matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (brand().theme === 'auto') applyBrand(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { if (effectiveTheme(brand()) === 'auto') applyBrand(); });
 
 // Logo para la cabecera / login
 function brandMark(size = 32) {
