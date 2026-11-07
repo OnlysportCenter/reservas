@@ -314,6 +314,12 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .pay-methods { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
 .pay-method { padding: 6px 12px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); font-size: 13px; }
 .pay-row { flex-wrap: wrap; }
+.turn-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.turn-chips button { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.turn-chips button span { display: inline-block; min-width: 20px; margin-left: 4px; padding: 0 6px; border-radius: 99px; background: var(--surface-2); color: var(--muted); font-size: 12px; text-align: center; }
+.turn-chips button.active { background: #2F5D8A; border-color: #2F5D8A; color: #fff; }
+.turn-chips button.active span { background: rgba(255,255,255,.25); color: #fff; }
+.turn-chips button[data-empty] { opacity: .5; }
 .pay-row .grow { min-width: 150px; }
 .pay-pill { border: 0; cursor: pointer; padding: 7px 12px; border-radius: 99px; font: inherit; font-size: 13px; }
 .pay-pill.paid { background: #E3F3E9; color: #1F7A45; }
@@ -482,7 +488,13 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .demo-list button { text-align: left; }
 
 /* Horario semanal (admin) */
-.week-grid { display: grid; grid-template-columns: repeat(7, minmax(130px, 1fr)); gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.week-grid { display: grid; grid-template-columns: repeat(var(--cols, 7), minmax(130px, 1fr)); gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+/* interruptor de fin de semana: verde = se ven, gris = ocultos */
+.silent-switch.wknd-switch, .silent-switch.wknd-switch.on { background: var(--surface); color: var(--text); border-color: var(--border); }
+.silent-switch.wknd-switch .sw { background: #b9b4ab; }
+.silent-switch.wknd-switch .sw i { left: 3px; }
+.silent-switch.wknd-switch.on .sw { background: #1F7A45; }
+.silent-switch.wknd-switch.on .sw i { left: 19px; }
 .week-col { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px; min-height: 120px; }
 .week-col h4 { margin: 0 0 8px; font-size: 13px; }
 .slot { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--c) 16%, var(--surface)); margin-bottom: 6px; border-left: 6px solid var(--c); }

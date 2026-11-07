@@ -963,9 +963,11 @@ function openClientForm(id, prefill = null, prospectId = '') {
 
 function viewAdminSchedule() {
   const tab = state.schedTab;
-  const order = [1, 2, 3, 4, 5, 6, 0];
+  const order = [1, 2, 3, 4, 5, 6, 0].filter(w => !hideWeekend() || (w !== 6 && w !== 0));
+  const wkndSlots = db.schedule.filter(t => t.weekday === 6 || t.weekday === 0).length;
   return `
-    <div class="page-title"><h1>Clases y horario</h1></div>
+    <div class="page-title"><h1>Clases y horario</h1>${tab !== 'types' ? weekendToggle() : ''}</div>
+    ${tab === 'week' && hideWeekend() && wkndSlots ? `<p class="small" style="color:var(--warn);margin:-6px 0 10px">⚠️ Hay ${wkndSlots} ${wkndSlots === 1 ? 'horario' : 'horarios'} en sábado o domingo que no se ven ahora.</p>` : ''}
     <div class="tabs"><button class="${tab === 'week' ? 'active' : ''}" data-a="sched-tab" data-t="week">Horario semanal</button>
       <button class="${tab === 'cal' ? 'active' : ''}" data-a="sched-tab" data-t="cal">📅 Calendario de la temporada</button>
       <button class="${tab === 'types' ? 'active' : ''}" data-a="sched-tab" data-t="types">Tipos de clase</button></div>
@@ -974,7 +976,7 @@ function viewAdminSchedule() {
         <div class="row wrap"><button class="btn" data-a="auto-colors">🎨 Un color por turno</button>
         <button class="btn" data-a="season-all">📆 Temporada de todos los turnos</button>
         <button class="btn primary" data-a="slot-add">${icon('plus', 'width="18" height="18"')}Añadir horario</button></div></div>
-      <div class="week-grid">${order.map(w => `<div class="week-col"><h4>${DOW_LONG[w]}</h4>
+      <div class="week-grid" style="--cols:${order.length}">${order.map(w => `<div class="week-col"><h4>${DOW_LONG[w]}</h4>
         ${db.schedule.filter(t => t.weekday === w).sort((a, b) => a.time.localeCompare(b.time)).map(t => { const ct = getClassType(t.classTypeId); return ct ? `<div class="slot clickable ${ct.hidden ? 'is-hidden' : ''}" style="--c:${slotColor(t)}" data-a="slot-open" data-id="${t.id}" title="Ver grupo fijo"><div><b>${t.time}</b> ${esc(ct.name)}${ct.hidden ? ' 🙈' : ''}
           <div class="slot-members ${(t.members || []).length > slotCapacity(t) ? 'over' : ''}">👥 ${(t.members || []).length}/${slotCapacity(t)}${t.capacity ? ' plazas' : ''}</div>
           ${t.startDate || t.endDate || (t.visibleDays != null && t.visibleDays !== '') ? `<div class="slot-members">📆 ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · 👁 ${t.visibleDays} d` : ''}</div>` : ''}</div><button class="x" data-a="slot-del" data-id="${t.id}" title="Quitar">×</button></div>` : ''; }).join('') || '<div class="muted small">—</div>'}
@@ -986,6 +988,10 @@ function viewAdminSchedule() {
         <span class="muted small">${db.schedule.filter(t => t.classTypeId === ct.id).length} horarios/sem</span></div>`).join('')}</div>`}`;
 }
 
+// Sábado y domingo en Clases (solo en el panel del administrador; a los socios se les quita en Ajustes)
+const hideWeekend = () => !!db.settings.adminHideWeekend;
+const weekendToggle = () => `<button class="silent-switch ${hideWeekend() ? '' : 'on'} wknd-switch" data-a="toggle-weekend" title="Solo cambia lo que ves tú en Clases">
+  <span class="sw"><i></i></span>${hideWeekend() ? 'Sin sábado ni domingo' : 'Con sábado y domingo'}</button>`;
 // Muestrario de colores para los turnos (al pulsar uno se copia al selector)
 const colorSwatches = (current, name) => TURN_COLORS.map(c =>
   `<button type="button" class="swatch-btn ${String(current).toLowerCase() === c.toLowerCase() ? 'on' : ''}" style="--c:${c}" data-a="pick-color" data-c="${c}" data-target="${name}" title="${c}"></button>`).join('');
@@ -1006,7 +1012,7 @@ function viewSeasonCalendar() {
     ? `${ws.getDate()} al ${we.getDate()} de ${MONTHS_FULL[we.getMonth()]}`
     : `${ws.getDate()} de ${MONTHS_FULL[ws.getMonth()]} al ${we.getDate()} de ${MONTHS_FULL[we.getMonth()]}`;
   const weeksLeft = Math.round((lastWeek - ws) / (7 * 86400000));
-  const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(ws, i));
+  const days = [0, 1, 2, 3, 4, 5, 6].filter(i => !hideWeekend() || i < 5).map(i => addDays(ws, i));
   const today = dateKey(new Date());
   return `
     <div class="cal-nav card">
@@ -1019,7 +1025,7 @@ function viewSeasonCalendar() {
       <button class="btn sm" data-a="cal-week" data-d="4">+1 mes</button>
       <span class="muted small" style="margin-left:auto">👁 = ya lo ven los socios · 🔒 = todavía no</span>
     </div>
-    <div class="week-grid">${days.map(d => {
+    <div class="week-grid" style="--cols:${days.length}">${days.map(d => {
       const k = dateKey(d);
       const real = sessionsOn(k);
       const items = [...real, ...projectedSessions(k)].sort((a, b) => a.time.localeCompare(b.time));
@@ -1270,6 +1276,7 @@ const actions = {
   },
   'ph-new': d => openPlaceholderForm(d.id),
   'silent-toggle': () => toggleSilentAdd(),
+  'toggle-weekend': () => { db.settings.adminHideWeekend = !db.settings.adminHideWeekend; saveDB(); render(); },
   'ph-toggle': d => { const c = getUser(d.id); c.active = !c.active; saveDB(); toast(c.active ? 'Comodín activado' : 'Comodín desactivado', 'ok'); openClient(d.id); render(); },
   'multi-add': d => openMultiAdd(d.id),
   'client-block': d => openBlockForm(d.id),

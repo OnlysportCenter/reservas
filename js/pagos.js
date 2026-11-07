@@ -19,6 +19,24 @@ function viewAdminPayments() {
   return head + (tab === 'day' ? viewCashDay() : tab === 'month' ? viewCashMonth() : tab === 'spend' ? viewSpending() : viewPayQuotas());
 }
 
+// Turnos de cada socio según sus grupos fijos: «L-X-V 9:15», «M-J 18:30»…
+const DAY_LETTER = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+function turnMap() {
+  const byUser = {};
+  db.schedule.forEach(t => (t.members || []).forEach(uid_ => {
+    ((byUser[uid_] = byUser[uid_] || {})[t.time] = byUser[uid_][t.time] || new Set()).add(t.weekday);
+  }));
+  const out = {};
+  Object.entries(byUser).forEach(([uid_, times]) => {
+    out[uid_] = Object.keys(times).sort().map(time => ({
+      key: time + '|' + [...times[time]].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).join(''),
+      label: [...times[time]].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7)).map(w => DAY_LETTER[w]).join('-') + ' ' + time.replace(/^0/, ''),
+      time,
+    }));
+  });
+  return out;
+}
+
 function viewPayQuotas() {
   const mk = state.payMonth || (state.payMonth = monthKey());
   const sum = monthSummary(mk);
@@ -27,8 +45,24 @@ function viewPayQuotas() {
   const payers = payersFor(mk);
   const statusOf = c => paymentOf(c.id, mk)?.status || 'pending';
   const filters = { pending: '⏳ Pendientes', paid: '✅ Pagados', absent: '🏖 No vienen', all: 'Todos' };
-  const list = payers.filter(c => (filt === 'all' || statusOf(c) === filt) && (!q || norm2(c.name + ' ' + c.email + ' ' + (c.phone || '')).includes(q)))
+  const tm = turnMap();
+  const turnsOf = c => tm[c.id] || [];
+  const byStatus = payers.filter(c => filt === 'all' || statusOf(c) === filt);
+  // turnos que existen entre los socios (ordenados por hora)
+  const turnList = [];
+  const seen = new Map();
+  payers.forEach(c => turnsOf(c).forEach(t => { if (!seen.has(t.key)) { seen.set(t.key, t); turnList.push(t); } }));
+  turnList.sort((a, b) => a.time.localeCompare(b.time) || a.key.localeCompare(b.key));
+  const turn = state.payTurn && (state.payTurn === 'none' || seen.has(state.payTurn)) ? state.payTurn : '';
+  const inTurn = (c, k) => k === 'none' ? !turnsOf(c).length : turnsOf(c).some(t => t.key === k);
+  const list = byStatus.filter(c => (!turn || inTurn(c, turn)) && (!q || norm2(c.name + ' ' + c.email + ' ' + (c.phone || '')).includes(q)))
     .sort((a, b) => a.name.localeCompare(b.name));
+  const nNone = byStatus.filter(c => !turnsOf(c).length).length;
+  const turnChips = turnList.length ? `<div class="turn-chips">
+      <button class="${!turn ? 'active' : ''}" data-a="pay-turn" data-t="">Todos los turnos</button>
+      ${turnList.map(t => { const n = byStatus.filter(c => inTurn(c, t.key)).length; return `<button class="${turn === t.key ? 'active' : ''}" data-a="pay-turn" data-t="${t.key}" ${n ? '' : 'data-empty="1"'}>${esc(t.label)} <span>${n}</span></button>`; }).join('')}
+      ${nNone ? `<button class="${turn === 'none' ? 'active' : ''}" data-a="pay-turn" data-t="none">Sin turno <span>${nNone}</span></button>` : ''}
+    </div>` : '';
   const isCurrent = mk === monthKey();
   const year = mk.slice(0, 4);
   const months = Array.from({ length: 12 }, (_, i) => `${year}-${pad(i + 1)}`);
@@ -63,8 +97,17 @@ function viewPayQuotas() {
     </div>
     ${Object.keys(sum.byMethod).length ? `<div class="pay-methods">${PAY_METHODS.concat(Object.keys(sum.byMethod).filter(m => !PAY_METHODS.includes(m))).filter(m => sum.byMethod[m]).map(m => `<span class="pay-method"><b>${esc(m)}</b> ${euro(sum.byMethod[m])}</span>`).join('')}</div>` : ''}
     <div class="tabs">${Object.entries(filters).map(([k, l]) => `<button class="${filt === k ? 'active' : ''}" data-a="pay-filter" data-f="${k}">${l} (${k === 'all' ? payers.length : payers.filter(c => statusOf(c) === k).length})</button>`).join('')}</div>
+    ${turnChips}
     <input class="search" placeholder="Buscar socio…" value="${esc(state.search)}" data-input="search">
-    <div class="card list">${list.length ? list.map(row).join('') : `<div class="empty">${filt === 'pending' ? '🎉 Nadie pendiente este mes.' : 'No hay socios en esta lista.'}</div>`}</div>
+    ${!list.length ? `<div class="card empty">${filt === 'pending' ? '🎉 Nadie pendiente' + (turn ? ' en este turno.' : ' este mes.') : 'No hay socios en esta lista.'}</div>`
+      : turn || q || !turnList.length ? `<div class="card list">${list.map(row).join('')}</div>`
+      // sin turno elegido: la lista sale agrupada por turnos (cada socio en su primer turno)
+      : (() => {
+          const groups = new Map(turnList.map(t => [t.key, []])); const none = [];
+          list.forEach(c => { const t = turnsOf(c)[0]; t ? groups.get(t.key).push(c) : none.push(c); });
+          return [...groups].filter(([, cs]) => cs.length).map(([k, cs]) => `<div class="section-h row between"><span>🕘 ${esc(seen.get(k).label)}</span><span>${cs.length}</span></div><div class="card list">${cs.map(row).join('')}</div>`).join('')
+            + (none.length ? `<div class="section-h row between"><span>Sin turno fijo</span><span>${none.length}</span></div><div class="card list">${none.map(row).join('')}</div>` : '');
+        })()}
     <div class="section-h">Resumen de ${year} · total ${euro(yearSum)}</div>
     <div class="card year-chart">${yearTotals.map(({ m, t }) => `<button class="yc-col ${m === mk ? 'on' : ''}" data-a="pay-month-set" data-m="${m}" title="${monthLabel(m)}: ${euro(t)}">
       <span class="yc-v">${t ? Math.round(t) + '€' : ''}</span><span class="yc-bar"><i style="height:${Math.round(t / maxT * 100)}%"></i></span><span class="yc-m">${MONTHS[Number(m.slice(5)) - 1]}</span></button>`).join('')}</div>`;
@@ -461,6 +504,7 @@ Object.assign(actions, {
   'pay-month': d => { state.payMonth = Number(d.d) === 0 ? monthKey() : shiftMonth(state.payMonth || monthKey(), Number(d.d)); render(); },
   'pay-month-set': d => { state.payMonth = d.m; render(); },
   'pay-filter': d => { state.payFilter = d.f; render(); },
+  'pay-turn': d => { state.payTurn = d.t; render(); },
   'pay-undo': d => { const p = db.payments.find(x => x.id === d.id); undoPayment(d.id); toast(p?.status === 'absent' ? 'Quitado' : 'Pago deshecho', 'ok'); closeModal(); render(); },
   'pay-absent': d => { recordPayment(d.id, d.m, { status: 'absent' }); toast('🏖 Marcado: este mes no viene', 'ok'); closeModal(); render(); },
   'pay-export': d => exportPaymentsMonth(d.m || state.payMonth || monthKey()),
