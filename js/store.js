@@ -60,6 +60,7 @@ function migrate() {
   db.users.forEach(u => { if (u.paymentDue === undefined) { u.paymentDue = false; u.paymentAnswer = null; changed = true; } });
   if (!db.prospects) { db.prospects = []; changed = true; }
   if (!db.payments) { db.payments = []; changed = true; }
+  if (!db.cashMoves) { db.cashMoves = []; changed = true; }
   db.users.forEach(u => { if (u.planExpires) { u.planExpires = null; changed = true; } });   // ya no hay caducidad
   db.plans.forEach(p => { if (!p.type) { p.type = 'bono'; p.perWeek = null; changed = true; } });
   if (!db.plans.some(p => p.type === 'weekly')) {

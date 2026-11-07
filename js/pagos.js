@@ -6,7 +6,20 @@ const capFirst = s => s.charAt(0).toUpperCase() + s.slice(1);
 const monthLabel = mk => `${capFirst(monthName(mk))} ${mk.slice(0, 4)}`;
 const fmtPayDate = d => { if (!d) return ''; const x = parseKey(String(d).slice(0, 10)); return `${x.getDate()} ${MONTHS[x.getMonth()]}`; };
 
+// Pestaña Pagos: Cuotas · Caja del día · Resumen del mes · Gastos
 function viewAdminPayments() {
+  const tab = state.payTab || 'quotas';
+  const tabs = { quotas: '💶 Cuotas', day: '🧾 Caja del día', month: '📊 Resumen del mes', spend: '📉 Gastos' };
+  const mk = state.payMonth || monthKey();
+  const head = `<div class="page-title"><h1>Pagos y caja</h1><div class="row wrap">
+      <button class="btn" data-a="pay-import">⬆️ Importar de gestión</button>
+      ${tab === 'quotas' ? `<button class="btn" data-a="pay-export" data-m="${mk}">⬇️ Excel del mes</button>` : ''}
+      ${tab === 'month' ? `<button class="btn" data-a="cash-export" data-m="${mk}">⬇️ Excel del mes</button>` : ''}</div></div>
+    <div class="tabs">${Object.entries(tabs).map(([k, l]) => `<button class="${tab === k ? 'active' : ''}" data-a="pay-tab" data-t="${k}">${l}</button>`).join('')}</div>`;
+  return head + (tab === 'day' ? viewCashDay() : tab === 'month' ? viewCashMonth() : tab === 'spend' ? viewSpending() : viewPayQuotas());
+}
+
+function viewPayQuotas() {
   const mk = state.payMonth || (state.payMonth = monthKey());
   const sum = monthSummary(mk);
   const q = norm2(state.search);
@@ -37,19 +50,16 @@ function viewAdminPayments() {
       ${right}</div>`;
   };
   return `
-    <div class="page-title"><h1>Pagos</h1><div class="row wrap">
-      <button class="btn" data-a="pay-import">⬆️ Importar de gestión</button>
-      <button class="btn" data-a="pay-export" data-m="${mk}">⬇️ Excel del mes</button></div></div>
     <div class="month-nav">
       <button class="btn ghost" data-a="pay-month" data-d="-1" aria-label="Mes anterior">‹</button>
       <div><b>${monthLabel(mk)}</b>${isCurrent ? '<span class="pill ok" style="margin-left:8px">Mes actual</span>' : `<button class="btn sm ghost" data-a="pay-month" data-d="0">Ir al mes actual</button>`}</div>
       <button class="btn ghost" data-a="pay-month" data-d="1" aria-label="Mes siguiente">›</button>
     </div>
     <div class="grid-stats">
-      <div class="card kpi" style="--k:#1F7A45"><div class="kpi-ic">💶</div><div><div class="v">${euro(sum.total)}</div><div class="l">Cobrado${sum.ivaTotal ? ` · IVA ${euro(sum.ivaTotal)}` : ''}</div></div></div>
-      <div class="card kpi" style="--k:#2F5D8A"><div class="kpi-ic">✅</div><div><div class="v">${sum.paidN}<small style="font-size:15px;color:var(--muted)">/${sum.payers}</small></div><div class="l">Han pagado</div></div></div>
-      <div class="card kpi" style="--k:#E8890C"><div class="kpi-ic">⏳</div><div><div class="v">${sum.pending.length}</div><div class="l">Pendientes · ${euro(sum.expected)}</div></div></div>
-      <div class="card kpi" style="--k:#6D4C9F"><div class="kpi-ic">🏖</div><div><div class="v">${sum.absent}</div><div class="l">No vienen este mes</div></div></div>
+      <div class="card kpi money" style="--k:#1F7A45"><div class="kpi-ic">💶</div><div><div class="v">${euro(sum.total)}</div><div class="l">Cobrado${sum.ivaTotal ? ` · IVA ${euro(sum.ivaTotal)}` : ''}</div></div></div>
+      <div class="card kpi money" style="--k:#2F5D8A"><div class="kpi-ic">✅</div><div><div class="v">${sum.paidN}<small style="font-size:15px;color:var(--muted)">/${sum.payers}</small></div><div class="l">Han pagado</div></div></div>
+      <div class="card kpi money" style="--k:#E8890C"><div class="kpi-ic">⏳</div><div><div class="v">${sum.pending.length}</div><div class="l">Pendientes · ${euro(sum.expected)}</div></div></div>
+      <div class="card kpi money" style="--k:#6D4C9F"><div class="kpi-ic">🏖</div><div><div class="v">${sum.absent}</div><div class="l">No vienen este mes</div></div></div>
     </div>
     ${Object.keys(sum.byMethod).length ? `<div class="pay-methods">${PAY_METHODS.concat(Object.keys(sum.byMethod).filter(m => !PAY_METHODS.includes(m))).filter(m => sum.byMethod[m]).map(m => `<span class="pay-method"><b>${esc(m)}</b> ${euro(sum.byMethod[m])}</span>`).join('')}</div>` : ''}
     <div class="tabs">${Object.entries(filters).map(([k, l]) => `<button class="${filt === k ? 'active' : ''}" data-a="pay-filter" data-f="${k}">${l} (${k === 'all' ? payers.length : payers.filter(c => statusOf(c) === k).length})</button>`).join('')}</div>
@@ -128,7 +138,7 @@ function openGestionImport() {
       <input type="file" id="gest-file" accept=".json,application/json" hidden>
       <div style="font-size:28px">📄</div><b>Pulsa para elegir el archivo</b>
     </label>
-    <div class="card small" style="margin-top:12px">Se traen <b>los pagos de todos los meses</b>, los meses marcados como «no viene» y la <b>cuota de cada socio</b>.
+    <div class="card small" style="margin-top:12px">Se traen <b>los pagos de todos los meses</b>, los meses marcados como «no viene», la <b>cuota de cada socio</b> y los <b>movimientos de caja</b> (ventas y gastos).
       Los socios se emparejan con los de esta app por correo, teléfono o nombre; los que no encuentre te los enseño antes de importar.
       Puedes importar varias veces: lo que ya esté se actualiza, no se duplica.</div>`);
 }
@@ -156,7 +166,9 @@ function prepareGestionImport(data) {
     const match = (gm.email && byEmail.get(gm.email.toLowerCase().trim())) || (digits9(gm.telefono).length === 9 && byPhone.get(digits9(gm.telefono))) || byName.get(full) || null;
     return { gm, match, n: count[gm.id] || 0, how: match ? 'auto' : '' };
   }).filter(r => r.n || r.gm.activo !== false);
-  state.gestImport = { data, rows };
+  let nMoves = 0;
+  Object.values(data.cajaExtra || {}).forEach(py => Object.values(py || {}).forEach(arr => { nMoves += (arr || []).length; }));
+  state.gestImport = { data, rows, nMoves };
   renderGestionPreview();
 }
 function renderGestionPreview() {
@@ -180,6 +192,7 @@ function renderGestionPreview() {
     <details style="margin-top:10px"><summary class="small" style="cursor:pointer">Ver los ${auto.length} emparejados automáticamente</summary>
       <div class="card list small" style="max-height:30vh;overflow:auto;margin-top:6px">${auto.map(r => `<div class="list-item"><span class="grow">${gName(r.gm)}</span><span class="muted">→ ${esc(getUser(r.match).name)}</span></div>`).join('')}</div></details>
     <label class="check small" style="margin-top:12px"><input type="checkbox" id="gest-fee" checked> Copiar también la cuota de cada socio (importe e IVA)</label>
+    ${state.gestImport.nMoves ? `<label class="check small"><input type="checkbox" id="gest-cash" checked> Traer también los ${state.gestImport.nMoves} movimientos de caja (ventas y gastos)</label>` : ''}
     <div class="modal-actions"><button class="btn" data-a="close">Cancelar</button><button class="btn primary" data-a="gest-run">Importar</button></div>`, 'wide');
 }
 function runGestionImport() {
@@ -210,12 +223,198 @@ function runGestionImport() {
       pays++;
     } else if (p.ausente) { recordPayment(uid_, month, { status: 'absent', note: 'Importado de gestión', noSave: true }); pays++; }
   }));
+  // movimientos de caja: se guardan con un id fijo («g-…») para que al reimportar no se dupliquen
+  let moves = 0;
+  if ($('#gest-cash')?.checked) {
+    const have = new Set(db.cashMoves.map(m => m.id));
+    Object.values(data.cajaExtra || {}).forEach(py => Object.entries(py || {}).forEach(([day, arr]) => (arr || []).forEach(mv => {
+      const id = 'g-' + (mv.id || `${day}-${mv.concepto}-${mv.importe}`);
+      if (have.has(id) || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return;
+      const amount = round2(Number(mv.importe) || 0);
+      if (!amount) return;
+      db.cashMoves.push({ id, date: day, concept: mv.concepto || (amount < 0 ? 'Gasto' : 'Ingreso'), method: mv.metodo || 'Efectivo',
+        base: round2(mv.base != null ? Number(mv.base) : amount), iva: !!mv.iva, amount, createdAt: mv.hora || `${day}T12:00:00.000Z` });
+      have.add(id); moves++;
+    })));
+  }
   saveDB();
   state.gestImport = null;
   closeModal();
-  toast(`Importado: ${pays} pagos/meses${created ? ` · ${created} clientes nuevos` : ''}${skipped ? ` · ${skipped} sin importar` : ''}`, 'ok');
+  toast(`Importado: ${pays} pagos/meses${moves ? ` · ${moves} movimientos de caja` : ''}${created ? ` · ${created} clientes nuevos` : ''}${skipped ? ` · ${skipped} sin importar` : ''}`, 'ok');
   render();
 }
+
+// ============================================================
+// Caja: cuotas cobradas cada día (por su fecha de pago) + otros movimientos (ventas y gastos)
+// ============================================================
+const cashPaysOn = day => db.payments.filter(p => p.status === 'paid' && p.paidAt && String(p.paidAt).slice(0, 10) === day);
+const cashMovesOn = day => db.cashMoves.filter(m => String(m.date).slice(0, 10) === day).sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+function addCashMove({ date, concept, base, iva, method, spend }) {
+  const b = Math.abs(round2(base));
+  const amount = withIva(b, iva) * (spend ? -1 : 1);
+  db.cashMoves.push({ id: uid(), date, concept, method, base: spend ? -b : b, iva: !!iva, amount: round2(amount), createdAt: new Date().toISOString() });
+  saveDB();
+}
+function deleteCashMove(id) { db.cashMoves = db.cashMoves.filter(m => m.id !== id); saveDB(); }
+// Resumen de caja de un periodo: prefix 'AAAA-MM-DD' (día), 'AAAA-MM' (mes) o 'AAAA' (año)
+function cashSummary(prefix) {
+  const inP = d => d && String(d).slice(0, 10).startsWith(prefix);
+  const pays = db.payments.filter(p => p.status === 'paid' && inP(p.paidAt));
+  const moves = db.cashMoves.filter(m => inP(m.date));
+  const byMethod = {}, byDay = {};
+  const add = (met, day, v) => { byMethod[met] = round2((byMethod[met] || 0) + v); byDay[day] = round2((byDay[day] || 0) + v); };
+  pays.forEach(p => add(p.method || 'Sin especificar', String(p.paidAt).slice(0, 10), p.total));
+  moves.forEach(m => add(m.method || 'Efectivo', String(m.date).slice(0, 10), m.amount));
+  const quotas = round2(pays.reduce((a, p) => a + p.total, 0));
+  const sales = round2(moves.filter(m => m.amount > 0).reduce((a, m) => a + m.amount, 0));
+  const spend = round2(moves.filter(m => m.amount < 0).reduce((a, m) => a + m.amount, 0));
+  return { quotas, sales, spend, net: round2(quotas + sales + spend), byMethod, byDay, nPays: pays.length, nMoves: moves.length };
+}
+const methodChips = bm => Object.keys(bm).length ? `<div class="pay-methods">${PAY_METHODS.concat(Object.keys(bm).filter(m => !PAY_METHODS.includes(m))).filter(m => bm[m]).map(m => `<span class="pay-method"><b>${esc(m)}</b> ${euro(bm[m])}</span>`).join('')}</div>` : '';
+const cashKpis = s => `<div class="grid-stats">
+  <div class="card kpi money" style="--k:#1F7A45"><div class="kpi-ic">💰</div><div><div class="v">${euro(s.net)}</div><div class="l">Total en caja</div></div></div>
+  <div class="card kpi money" style="--k:#2F5D8A"><div class="kpi-ic">💶</div><div><div class="v">${euro(s.quotas)}</div><div class="l">Cuotas (${s.nPays})</div></div></div>
+  <div class="card kpi money" style="--k:#6D4C9F"><div class="kpi-ic">🥤</div><div><div class="v">${euro(s.sales)}</div><div class="l">Otras ventas</div></div></div>
+  <div class="card kpi money" style="--k:#C0392B"><div class="kpi-ic">📉</div><div><div class="v">${euro(s.spend)}</div><div class="l">Gastos</div></div></div></div>`;
+const fmtDayLong = k => { const d = parseKey(k); return `${capFirst(DOW_LONG[d.getDay()])} ${d.getDate()} de ${MONTHS_LONG[d.getMonth()]}`; };
+
+function viewCashDay() {
+  const day = state.cashDate || (state.cashDate = dateKey(new Date()));
+  const s = cashSummary(day), pays = cashPaysOn(day), moves = cashMovesOn(day);
+  const isToday = day === dateKey(new Date());
+  return `
+    <div class="month-nav">
+      <button class="btn ghost" data-a="cash-day" data-d="-1" aria-label="Día anterior">‹</button>
+      <div><b>${fmtDayLong(day)}</b>${isToday ? '<span class="pill ok" style="margin-left:8px">Hoy</span>' : '<button class="btn sm ghost" data-a="cash-day" data-d="0">Ir a hoy</button>'}
+        <input type="date" class="search" style="margin:0 0 0 6px;width:auto;padding:6px 8px" value="${day}" data-change="cash-date" aria-label="Elegir fecha"></div>
+      <button class="btn ghost" data-a="cash-day" data-d="1" aria-label="Día siguiente">›</button>
+    </div>
+    ${cashKpis(s)}
+    ${methodChips(s.byMethod)}
+    <div class="section-h">Cuotas cobradas este día (${pays.length})</div>
+    <div class="card list">${pays.length ? pays.map(p => { const u = getUser(p.userId); return `<div class="list-item clickable" data-a="pay-open" data-id="${p.userId}" data-m="${p.month}">
+      <div class="avatar">${initials(u?.name || '?')}</div>
+      <div class="grow"><div class="ellipsis" style="font-weight:600">${esc(u?.name || 'Socio borrado')}</div><div class="muted small">Cuota de ${monthName(p.month)}${p.month.slice(0, 4) !== day.slice(0, 4) ? ' ' + p.month.slice(0, 4) : ''}${p.iva ? ' · con IVA' : ''}</div></div>
+      <span class="pill">${esc(p.method)}</span><b style="min-width:80px;text-align:right">${euro(p.total)}</b></div>`; }).join('')
+      : '<div class="empty">Sin cuotas cobradas este día. Las que registres en «Cuotas» aparecen aquí según su fecha de pago.</div>'}</div>
+    <div class="section-h">Otros movimientos de caja (${moves.length})</div>
+    <div class="card">
+      <form data-form="cashmove" data-day="${day}" class="cash-form">
+        <div class="row" style="gap:6px;margin-bottom:10px"><label class="tab-radio"><input type="radio" name="kind" value="sale" checked><span>➕ Ingreso</span></label><label class="tab-radio"><input type="radio" name="kind" value="spend"><span>➖ Gasto</span></label></div>
+        <div class="row wrap" style="gap:8px">
+          <input class="search grow" style="margin:0;min-width:180px" name="concept" placeholder="Concepto (venta de agua, material, luz…)" required>
+          <input class="search" style="margin:0;width:120px" name="base" type="number" step="0.01" min="0.01" placeholder="Importe €" required>
+          <select class="search" style="margin:0;width:auto" name="method">${PAY_METHODS.map(m => `<option>${m}</option>`).join('')}</select>
+          <label class="check" style="margin:0"><input type="checkbox" name="iva"> IVA 21%</label>
+          <button class="btn primary" type="submit">Añadir</button>
+        </div>
+        <div class="row wrap" style="gap:8px;margin-top:10px">
+          <button type="button" class="btn sm" data-a="cash-quick" data-c="Agua / bebida" data-k="sale">🥤 Agua / bebida</button>
+          <button type="button" class="btn sm" data-a="cash-quick" data-c="Matrícula" data-k="sale">📝 Matrícula</button>
+          <button type="button" class="btn sm" data-a="cash-quick" data-c="" data-k="spend">📉 Gasto rápido</button>
+        </div>
+      </form>
+      ${moves.length ? `<div class="list" style="margin-top:12px;border-top:1px solid var(--border)">${moves.map(m => `<div class="list-item">
+        <div class="grow"><div style="font-weight:600">${esc(m.concept || (m.amount < 0 ? 'Gasto' : 'Ingreso'))}</div><div class="muted small">${esc(m.method)}${m.iva ? ' · con IVA' : ''}</div></div>
+        <b style="color:${m.amount < 0 ? 'var(--danger)' : 'var(--ok)'}">${m.amount < 0 ? '' : '+'}${euro(m.amount)}</b>
+        <button class="btn sm ghost" data-a="cash-del" data-id="${m.id}" title="Eliminar">${icon('x', 'width="16" height="16"')}</button></div>`).join('')}</div>`
+        : '<p class="muted small" style="margin:12px 0 0">Sin movimientos este día. Aquí van las ventas sueltas y los gastos de caja.</p>'}
+    </div>`;
+}
+
+function viewCashMonth() {
+  const mk = state.payMonth || (state.payMonth = monthKey());
+  const s = cashSummary(mk);
+  const days = Object.keys(s.byDay).sort();
+  const isCurrent = mk === monthKey();
+  return `
+    <div class="month-nav">
+      <button class="btn ghost" data-a="pay-month" data-d="-1" aria-label="Mes anterior">‹</button>
+      <div><b>${monthLabel(mk)}</b>${isCurrent ? '<span class="pill ok" style="margin-left:8px">Mes actual</span>' : '<button class="btn sm ghost" data-a="pay-month" data-d="0">Ir al mes actual</button>'}</div>
+      <button class="btn ghost" data-a="pay-month" data-d="1" aria-label="Mes siguiente">›</button>
+    </div>
+    ${cashKpis(s)}
+    ${methodChips(s.byMethod)}
+    <p class="muted small" style="margin:-4px 0 12px">Cuenta el dinero por el día en que entró: una cuota de noviembre pagada el 30 de octubre suma en octubre.</p>
+    <div class="section-h">Día a día</div>
+    <div class="card list">${days.length ? days.map(d => { const ds = cashSummary(d); return `<div class="list-item clickable" data-a="cash-goto" data-d="${d}">
+      <div class="grow"><b>${fmtDayLong(d)}</b><div class="muted small">${ds.nPays} cuota(s)${ds.nMoves ? ` · ${ds.nMoves} movimiento(s)` : ''}${ds.spend ? ` · gastos ${euro(ds.spend)}` : ''}</div></div>
+      <b>${euro(s.byDay[d])}</b><span class="muted">›</span></div>`; }).join('') : '<div class="empty">Sin dinero registrado este mes.</div>'}</div>`;
+}
+
+function viewSpending() {
+  const y = state.spendYear || (state.spendYear = String(new Date().getFullYear()));
+  const list = db.cashMoves.filter(m => m.amount < 0 && String(m.date).startsWith(y)).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const total = round2(list.reduce((a, m) => a + m.amount, 0));
+  const byMonth = {};
+  list.forEach(m => (byMonth[String(m.date).slice(0, 7)] = byMonth[String(m.date).slice(0, 7)] || []).push(m));
+  const ys = cashSummary(y);
+  return `
+    <div class="month-nav">
+      <button class="btn ghost" data-a="spend-year" data-d="-1" aria-label="Año anterior">‹</button>
+      <div><b>${y}</b></div>
+      <button class="btn ghost" data-a="spend-year" data-d="1" aria-label="Año siguiente">›</button>
+    </div>
+    <div class="grid-stats" style="grid-template-columns:repeat(3,1fr)">
+      <div class="card kpi money" style="--k:#C0392B"><div class="kpi-ic">📉</div><div><div class="v">${euro(total)}</div><div class="l">Gastos de ${y}</div></div></div>
+      <div class="card kpi money" style="--k:#2F5D8A"><div class="kpi-ic">💶</div><div><div class="v">${euro(round2(ys.quotas + ys.sales))}</div><div class="l">Ingresos de ${y}</div></div></div>
+      <div class="card kpi money" style="--k:#1F7A45"><div class="kpi-ic">💰</div><div><div class="v">${euro(ys.net)}</div><div class="l">Balance de ${y}</div></div></div>
+    </div>
+    <p class="muted small" style="margin:-4px 0 12px">Los gastos se apuntan en «Caja del día» con «➖ Gasto».</p>
+    ${Object.keys(byMonth).length ? Object.keys(byMonth).sort().reverse().map(m => `
+      <div class="section-h row between"><span>${monthLabel(m)}</span><span style="color:var(--danger)">${euro(round2(byMonth[m].reduce((a, x) => a + x.amount, 0)))}</span></div>
+      <div class="card list">${byMonth[m].map(g => `<div class="list-item">
+        <div class="grow clickable" data-a="cash-goto" data-d="${String(g.date).slice(0, 10)}"><div style="font-weight:600">${esc(g.concept || 'Gasto')}</div><div class="muted small">${fmtDateShort(String(g.date).slice(0, 10))} · ${esc(g.method)}</div></div>
+        <b style="color:var(--danger)">${euro(g.amount)}</b>
+        <button class="btn sm ghost" data-a="cash-del" data-id="${g.id}" title="Eliminar">${icon('x', 'width="16" height="16"')}</button></div>`).join('')}</div>`).join('')
+      : '<div class="card empty">Sin gastos registrados en ' + y + '.</div>'}`;
+}
+
+function exportCashMonth(mk) {
+  const cell = v => { const s = String(v ?? ''); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const num = n => String(round2(n)).replace('.', ',');
+  const rows = [['Fecha', 'Tipo', 'Concepto', 'Forma de pago', 'Importe', 'IVA', 'Total']];
+  const items = [
+    ...db.payments.filter(p => p.status === 'paid' && String(p.paidAt || '').startsWith(mk)).map(p => [String(p.paidAt).slice(0, 10), 'Cuota', `${getUser(p.userId)?.name || '?'} · cuota ${monthName(p.month)}`, p.method, p.base, round2(p.total - p.base), p.total]),
+    ...db.cashMoves.filter(m => String(m.date).startsWith(mk)).map(m => [String(m.date).slice(0, 10), m.amount < 0 ? 'Gasto' : 'Ingreso', m.concept, m.method, m.base, round2(m.amount - m.base), m.amount]),
+  ].sort((a, b) => a[0].localeCompare(b[0]));
+  items.forEach(r => rows.push([r[0], r[1], r[2], r[3], num(r[4]), num(r[5]), num(r[6])]));
+  const s = cashSummary(mk);
+  rows.push([], ['', '', 'Cuotas', '', '', '', num(s.quotas)], ['', '', 'Otras ventas', '', '', '', num(s.sales)], ['', '', 'Gastos', '', '', '', num(s.spend)], ['', '', 'TOTAL EN CAJA', '', '', '', num(s.net)]);
+  Object.entries(s.byMethod).forEach(([m, t]) => rows.push(['', '', `Total ${m}`, '', '', '', num(t)]));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = `caja-${mk}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+document.addEventListener('change', e => {
+  if (e.target.dataset?.change === 'cash-date' && e.target.value) { state.cashDate = e.target.value; render(); }
+});
+
+Object.assign(actions, {
+  'pay-tab': d => { state.payTab = d.t; render(); },
+  'cash-day': d => { state.cashDate = Number(d.d) === 0 ? dateKey(new Date()) : dateKey(addDays(parseKey(state.cashDate || dateKey(new Date())), Number(d.d))); render(); },
+  'cash-goto': d => { state.cashDate = d.d; state.payTab = 'day'; render(); window.scrollTo(0, 0); },
+  'cash-quick': d => {
+    const f = document.querySelector('[data-form="cashmove"]'); if (!f) return;
+    f.querySelector(`[name=kind][value="${d.k}"]`).checked = true;
+    f.concept.value = d.c; (d.c ? f.base : f.concept).focus();
+  },
+  'cash-del': d => confirmModal('Eliminar movimiento', 'Se borrará este movimiento de caja. No se puede deshacer.', `data-a="cash-del-ok" data-id="${d.id}"`, 'Eliminar'),
+  'cash-del-ok': d => { deleteCashMove(d.id); closeModal(); toast('Movimiento eliminado', 'ok'); render(); },
+  'cash-export': d => exportCashMonth(d.m || state.payMonth || monthKey()),
+  'spend-year': d => { state.spendYear = String(Number(state.spendYear || new Date().getFullYear()) + Number(d.d)); render(); },
+});
+Object.assign(forms, {
+  cashmove: (f, form) => {
+    const base = Number(f.get('base'));
+    if (!f.get('concept').trim() || !base) return toast('Pon un concepto y un importe', 'err');
+    addCashMove({ date: form.dataset.day, concept: f.get('concept').trim(), base, iva: f.get('iva') === 'on', method: f.get('method'), spend: f.get('kind') === 'spend' });
+    toast(f.get('kind') === 'spend' ? '📉 Gasto apuntado' : '➕ Ingreso apuntado', 'ok');
+    render();
+  },
+});
 
 Object.assign(actions, {
   'pay-open': d => openPaymentModal(d.id, d.m || monthKey()),
