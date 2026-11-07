@@ -113,20 +113,42 @@
     const raw = { plans, classTypes: cts, schedule: sched, users: members, sessions, bookings, announcements: anns, notifications: notifs, emails, prospects, payments, cashMoves };
     applyLoaded(settings, raw);
   }
+  // El socio solo descarga lo que usa: las clases que puede ver (desde el lunes de esta semana hasta
+  // donde llega la antelación), su historial reciente, su ficha, sus grupos y los últimos avisos.
+  const SCHED_COLS = 'id, weekday, time, class_type_id, capacity, start_date, end_date, visible_days, color';
   async function loadClient() {
-    const from = dateKey(addDays(new Date(), -35)), to = dateKey(addDays(new Date(), 40));
-    const [settings, plans, cts, sched, me, sessions, stats, mine, anns, notifs] = await Promise.all([
+    const histFrom = dateKey(addDays(new Date(), -35));
+    const [settings, plans, cts, sched, me, mine, anns, notifs] = await Promise.all([
       loadSettings(),
       fetchAll(() => sb.from('plans').select('*')),
       fetchAll(() => sb.from('class_types').select('*')),
-      fetchAll(() => sb.from('schedule').select('*')),
+      fetchAll(() => sb.from('schedule').select(SCHED_COLS)),
       fetchAll(() => sb.from('members').select('*')),
-      fetchAll(() => sb.from('sessions').select('*').gte('date', from).lte('date', to)),
-      fetchAll(() => sb.from('session_stats').select('*, sessions!inner(date)').gte('sessions.date', from).lte('sessions.date', to)),
-      sb.rpc('my_bookings').then(r => { if (r.error) throw r.error; return r.data; }),
-      fetchAll(() => sb.from('announcements').select('*')),
+      sb.rpc('my_bookings', { since: histFrom }).then(r => { if (r.error) throw r.error; return r.data; }),
+      fetchAll(() => sb.from('announcements').select('*').order('date', { ascending: false }).limit(20)),
       fetchAll(() => sb.from('notifications').select('*').order('date', { ascending: false }).limit(60)),
     ]);
+    // hasta dónde ven los socios (la antelación general o la de algún turno, la mayor) + margen
+    const horizon = Math.max(Number(settings.bookWindowDays) || 7, ...sched.map(t => Number(t.visible_days) || 0)) + 2;
+    const from = dateKey(weekStart(new Date())), to = dateKey(addDays(new Date(), horizon));
+    const myId = me[0]?.id;
+    const [sessions, stats, myGroups] = await Promise.all([
+      fetchAll(() => sb.from('sessions').select('*').gte('date', from).lte('date', to)),
+      fetchAll(() => sb.from('session_stats').select('session_id, booked, waitlist, sessions!inner(date)').gte('sessions.date', from).lte('sessions.date', to)),
+      myId ? fetchAll(() => sb.from('schedule').select('id').contains('members', [myId])) : Promise.resolve([]),
+    ]);
+    // clases pasadas de su historial (solo las suyas)
+    const inWin = new Set(sessions.map(s => s.id));
+    const pastIds = [...new Set(mine.map(b => b.session_id).filter(id => !inWin.has(id)))];
+    if (pastIds.length) {
+      for (let i = 0; i < pastIds.length; i += 80) {
+        const { data, error } = await sb.from('sessions').select('*').in('id', pastIds.slice(i, i + 80));
+        if (error) throw error;
+        sessions.push(...data);
+      }
+    }
+    const mineSet = new Set(myGroups.map(g => g.id));
+    sched.forEach(t => { t.members = mineSet.has(t.id) && myId ? [myId] : []; });
     const sesIds = new Set(sessions.map(s => s.id));
     const bookings = mine.filter(b => sesIds.has(b.session_id)).map(b => ({ ...b, wait_position: b.wait_position }));
     applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [], cashMoves: [] });
@@ -255,16 +277,31 @@
   };
 
   // ---------- Tiempo real ----------
-  let rtTimer = null, channel = null;
+  let rtTimer = null, paintTimer = null, channel = null;
   function liveRenderSafe() { if (me() && !$('#modal-root').innerHTML) liveRender(); }
+  // Recarga tras un cambio. Cada móvil espera un poco distinto para que, si entran 100 a la vez,
+  // no pidan todos los datos en el mismo segundo.
+  function scheduleReload() {
+    clearTimeout(rtTimer);
+    const wait = role === 'admin' ? 2500 : 1500 + Math.random() * 3000;
+    rtTimer = setTimeout(() => reload().then(liveRenderSafe), wait);
+  }
   function subscribe() {
     if (channel) sb.removeChannel(channel);
     channel = sb.channel('reservas');
-    ['session_stats', 'bookings', 'notifications', 'sessions', 'announcements', 'members', 'schedule'].forEach(t =>
-      channel.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => {
-        clearTimeout(rtTimer);
-        rtTimer = setTimeout(() => reload().then(liveRenderSafe), 1200);
-      }));
+    // Las plazas libres de cada clase: el aviso ya trae el número nuevo, así que el socio
+    // lo pinta sin pedir nada al servidor (es lo que más cambia cuando hay mucha gente).
+    channel.on('postgres_changes', { event: '*', schema: 'public', table: 'session_stats' }, payload => {
+      if (role === 'admin') return scheduleReload();
+      const row = payload.new && payload.new.session_id ? payload.new : null;
+      const s = row && db?.sessions.find(x => x.id === row.session_id);
+      if (!s) return;
+      s.stats = { booked: row.booked, waitlist: row.waitlist };
+      clearTimeout(paintTimer);
+      paintTimer = setTimeout(liveRenderSafe, 300);
+    });
+    ['bookings', 'notifications', 'sessions', 'announcements', 'members', 'schedule'].forEach(t =>
+      channel.on('postgres_changes', { event: '*', schema: 'public', table: t }, scheduleReload));
     channel.subscribe();
   }
 
@@ -422,7 +459,11 @@
     else renderLogin();
     if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
     // por si se pierde el tiempo real (móvil en reposo): refresco al volver a la app y cada 2 minutos
-    document.addEventListener('visibilitychange', () => { if (!document.hidden && role) reload().then(liveRenderSafe); });
-    setInterval(() => { if (role && !document.hidden) reload().then(liveRenderSafe); }, 120000);
+    // Al volver a la app se recarga (si hace más de 20 s de la última vez); con la app abierta,
+    // un repaso cada 2 min (administrador) o 4 min (socios): lo demás llega solo por tiempo real.
+    let lastLoad = Date.now();
+    const refresh = () => { lastLoad = Date.now(); return reload().then(liveRenderSafe); };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && role && Date.now() - lastLoad > 20000) refresh(); });
+    setInterval(() => { if (role && !document.hidden && Date.now() - lastLoad > 60000) refresh(); }, role === 'admin' ? 120000 : 240000);
   };
 })();
