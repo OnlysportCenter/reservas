@@ -710,51 +710,73 @@ function openSlot(slotId) {
   const members = t.members.map(getUser).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
   const others = clients().filter(c => c.active && !t.members.includes(c.id)).sort((a, b) => a.name.localeCompare(b.name));
   const next = db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > new Date() && !s.cancelled).sort((a, b) => sessionStart(a) - sessionStart(b))[0];
-  openModal(`${modalHead(`Grupo · ${esc(slotLabel(t))}`)}
-    <div class="row" style="justify-content:flex-end;margin:-6px 0 10px"><button class="btn sm refresh-btn" data-a="refresh-modal" data-k="slot" data-id="${t.id}">${icon('refresh', 'width="17" height="17"')} Actualizar</button></div>
-    <div class="card row wrap" style="margin:-4px 0 12px;gap:12px">
-      <div class="grow"><b>Plazas de este turno</b><div class="muted small">${t.capacity ? 'Propias de este turno' : `Las del tipo de clase (${ct.capacity})`}. Se aplican a todas sus próximas clases.</div></div>
-      <input type="number" min="1" max="200" id="slot-cap" class="search" style="margin:0;width:90px" value="${slotCapacity(t)}">
-      <button class="btn sm primary" data-a="slot-cap" data-id="${t.id}">Guardar</button>
+  const cap = slotCapacity(t), freeG = cap - members.length;
+  const upcoming = db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > new Date() && !s.cancelled).sort((a, b) => sessionStart(a) - sessionStart(b)).slice(0, 5);
+  const sameTime = db.schedule.filter(x => x.time === t.time && x.classTypeId === t.classTypeId).map(x => DOW[x.weekday]).join(', ');
+  openModal(`
+    <div class="sx-head" style="--c:${slotColor(t)}">
+      <div class="sx-time"><b>${t.time}</b><span>${DOW[t.weekday]}</span></div>
+      <div class="grow"><h2>${esc(ct.name)} · grupo fijo</h2><div class="sx-sub">Todos los ${DOW_LONG[t.weekday].toLowerCase()} a las ${t.time} · ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · los socios lo ven ${t.visibleDays} días antes` : ''}</div></div>
+      <button class="btn sm refresh-btn" data-a="refresh-modal" data-k="slot" data-id="${t.id}" title="Ver los últimos cambios">${icon('refresh', 'width="17" height="17"')} Actualizar</button>
+      <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
     </div>
-    <div class="card" style="margin:0 0 12px">
-      <b>Color del turno</b> <span class="muted small">· se ve en tu horario, el calendario y la app de los socios</span>
-      <div class="row wrap" style="margin-top:8px">${colorSwatches(slotColor(t), 'turn-color')}
-        <input type="color" id="turn-color-custom" value="${slotColor(t)}" style="width:44px;height:32px;padding:2px;border-radius:8px;border:1px solid var(--border)"></div>
-      <div class="row wrap" style="margin-top:8px">
-        <label class="check" style="margin:0"><input type="checkbox" id="turn-color-all" checked> Todos los días de las ${t.time} (${db.schedule.filter(x => x.time === t.time && x.classTypeId === t.classTypeId).map(x => DOW[x.weekday]).join(', ')})</label>
-        <button class="btn sm primary" style="margin-left:auto" data-a="turn-color-save" data-id="${t.id}">Guardar color</button>
-      </div>
+    <div class="sx-stats">
+      <div><b>${members.length}<small>/${cap}</small></b><span>En el grupo</span></div>
+      <div><b class="${freeG <= 0 ? 'danger' : freeG <= 2 ? 'warn' : 'ok'}">${Math.max(0, freeG)}</b><span>${freeG === 1 ? 'Hueco libre' : 'Huecos libres'}</span></div>
+      <div><b>${cap}</b><span>Plazas del turno</span></div>
+      <div><b>${upcoming.length}</b><span>Próximas clases</span></div>
     </div>
-    <div class="card" style="margin:0 0 12px">
-      <b>Temporada y antelación</b> <span class="muted small">· ahora: ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · los socios lo ven ${t.visibleDays} días antes` : ''}</span>
-      <div class="fields-2" style="margin-top:8px">
-        <div class="field" style="margin:0"><label>Desde (mes)</label><input id="season-from" type="month" value="${t.startDate ? t.startDate.slice(0, 7) : ''}"></div>
-        <div class="field" style="margin:0"><label>Hasta (mes)</label><input id="season-to" type="month" value="${t.endDate ? t.endDate.slice(0, 7) : ''}"></div>
+    <div class="sx-bar"><i class="${members.length >= cap ? 'full' : ''}" style="width:${Math.min(100, Math.round(members.length / Math.max(1, cap) * 100))}%;--c:${slotColor(t)}"></i></div>
+    ${members.length > cap ? '<p class="small" style="color:var(--danger);margin:8px 0 0">⚠️ El grupo supera el aforo del turno.</p>' : ''}
+    <div class="sx-cols">
+      <div>
+        <div class="section-h">Socios del grupo (${members.length}) · las plazas que sobren las pueden reservar otros</div>
+        <div class="card list sx-list">${members.length ? members.map(u => `<div class="sx-member"><div class="avatar">${initials(u.name)}</div>
+          <div class="grow"><div class="sx-name clickable" data-a="client-open" data-id="${u.id}">${esc(u.name)}</div><div class="sx-meta"><span class="muted small">${esc(getPlan(u.planId)?.name || 'Sin tarifa')} · ${groupsOf(u.id).length} grupo(s)</span>
+            ${u.blocked ? '<span class="mtag danger">🔒 Bloqueado</span>' : ''}${u.paymentDue ? '<span class="mtag warn">💶 Cuota</span>' : ''}${!planStatus(u).ok && !u.blocked ? '<span class="mtag warn">sin tarifa activa: no se le reserva</span>' : ''}</div></div>
+          <button class="btn sm quitar" data-a="group-remove" data-id="${t.id}" data-u="${u.id}" title="Quitar del grupo">${icon('x', 'width="15" height="15"')} Quitar</button></div>`).join('') : '<div class="empty">Este horario no tiene grupo fijo todavía.</div>'}</div>
+        <div class="section-h">Añadir socios al grupo</div>
+        <input class="search" placeholder="Buscar cliente…" data-filter="#group-add-list .multi-item">
+        <label class="check small"><input type="checkbox" data-filter-nogroup="#group-add-list .multi-item"> Mostrar solo clientes sin ningún grupo</label>
+        <div class="multi-list" id="group-add-list" style="max-height:34vh">${others.map(c => {
+          const ng = groupsOf(c.id).length, w = isWeekly(c) ? getPlan(c.planId).perWeek : null;
+          return `<label class="multi-item" data-search="${esc(norm2(c.name + ' ' + c.email))}" data-groups="${ng}"><input type="checkbox" name="gadd" value="${c.id}">
+            <span class="grow ellipsis">${esc(c.name)}</span><span class="muted small">${esc(getPlan(c.planId)?.name || 'sin tarifa')} · ${ng}${w ? '/' + w : ''} grupo(s)</span></label>`;
+        }).join('') || '<div class="empty">No quedan clientes por añadir.</div>'}</div>
+        ${addNotify(false, true)}
+        <button class="btn primary" data-a="group-add" data-id="${t.id}">Añadir seleccionados al grupo</button>
+        <p class="muted small">Se les reservan ya las próximas clases de este horario y, a partir de ahí, todas las semanas.</p>
       </div>
-      <div class="row wrap" style="margin-top:8px">
-        <div class="field grow" style="margin:0"><label>Días de antelación para los socios</label><input id="season-vis" type="number" min="0" max="120" placeholder="Lo general: ${db.settings.bookWindowDays}" value="${t.visibleDays ?? ''}"></div>
-        <button class="btn sm primary" style="align-self:flex-end" data-a="slot-season" data-id="${t.id}">Guardar</button>
+      <div class="sx-side">
+        <div class="card">
+          <b>Próximas clases</b>
+          <div class="list" style="margin-top:6px">${upcoming.length ? upcoming.map(s => { const n = bookedIn(s.id).length, w = waitlistOf(s.id).length; return `<div class="list-item clickable" data-a="session-open" data-id="${s.id}" style="padding:8px 0">
+            <div class="grow"><b>${fmtDateShort(s.date)}</b><div class="muted small">${n}/${s.capacity} apuntados${w ? ` · ${w} en espera` : ''}${s.hidden ? ' · oculta' : ''}</div></div><span class="muted">›</span></div>`; }).join('') : '<div class="muted small">No hay clases próximas de este horario.</div>'}</div>
+        </div>
+        <div class="card">
+          <b>Plazas del turno</b>
+          <div class="muted small" style="margin:2px 0 8px">${t.capacity ? 'Propias de este turno' : `Las del tipo de clase (${ct.capacity})`}. Se aplican a todas sus próximas clases.</div>
+          <div class="row" style="gap:8px"><input type="number" min="1" max="200" id="slot-cap" class="search" style="margin:0;width:90px" value="${cap}"><button class="btn sm primary" data-a="slot-cap" data-id="${t.id}">Guardar</button></div>
+        </div>
+        <div class="card">
+          <b>Color del turno</b>
+          <div class="muted small" style="margin:2px 0 8px">Se ve en tu horario, el calendario y la app de los socios.</div>
+          <div class="row wrap">${colorSwatches(slotColor(t), 'turn-color')}
+            <input type="color" id="turn-color-custom" value="${slotColor(t)}" style="width:44px;height:32px;padding:2px;border-radius:8px;border:1px solid var(--border)"></div>
+          <label class="check small" style="margin:8px 0"><input type="checkbox" id="turn-color-all" checked> Todos los días de las ${t.time} (${sameTime})</label>
+          <button class="btn sm primary block" data-a="turn-color-save" data-id="${t.id}">Guardar color</button>
+        </div>
+        <div class="card">
+          <b>Temporada y antelación</b>
+          <div class="fields-2" style="margin-top:8px">
+            <div class="field" style="margin:0"><label>Desde (mes)</label><input id="season-from" type="month" value="${t.startDate ? t.startDate.slice(0, 7) : ''}"></div>
+            <div class="field" style="margin:0"><label>Hasta (mes)</label><input id="season-to" type="month" value="${t.endDate ? t.endDate.slice(0, 7) : ''}"></div>
+          </div>
+          <div class="field" style="margin:8px 0 0"><label>Días que lo ven los socios antes</label><input id="season-vis" type="number" min="0" max="120" placeholder="Lo general: ${db.settings.bookWindowDays}" value="${t.visibleDays ?? ''}"></div>
+          <button class="btn sm primary block" style="margin-top:8px" data-a="slot-season" data-id="${t.id}">Guardar temporada</button>
+        </div>
       </div>
-    </div>
-    <p class="muted" style="margin-top:-4px">${members.length} de ${slotCapacity(t)} plazas ocupadas por el grupo fijo${members.length > slotCapacity(t) ? ' · <b style="color:var(--danger)">supera el aforo</b>' : ''}.
-      Las plazas que queden libres las pueden reservar otros clientes.</p>
-    <div class="card list">${members.length ? members.map(u => `<div class="list-item"><div class="avatar">${initials(u.name)}</div>
-      <div class="grow"><div class="ellipsis">${esc(u.name)}</div><div class="muted small">${esc(getPlan(u.planId)?.name || 'Sin tarifa')} · ${groupsOf(u.id).length} grupo(s)${u.blocked ? ' · <b style="color:var(--danger)">bloqueado</b>' : ''}
-        ${!planStatus(u).ok && !u.blocked ? ' · <b style="color:var(--warn)">no se le reserva hasta que tenga tarifa activa</b>' : ''}</div></div>
-      <button class="btn sm ghost" data-a="group-remove" data-id="${t.id}" data-u="${u.id}" title="Quitar del grupo">${icon('x', 'width="16" height="16"')}</button></div>`).join('') : '<div class="empty">Este horario no tiene grupo fijo todavía.</div>'}</div>
-    <div class="section-h">Añadir clientes al grupo</div>
-    <input class="search" placeholder="Buscar cliente…" data-filter="#group-add-list .multi-item">
-    <label class="check small"><input type="checkbox" data-filter-nogroup="#group-add-list .multi-item"> Mostrar solo clientes sin ningún grupo</label>
-    <div class="multi-list" id="group-add-list" style="max-height:30vh">${others.map(c => {
-      const ng = groupsOf(c.id).length, w = isWeekly(c) ? getPlan(c.planId).perWeek : null;
-      return `<label class="multi-item" data-search="${esc(norm2(c.name + ' ' + c.email))}" data-groups="${ng}"><input type="checkbox" name="gadd" value="${c.id}">
-        <span class="grow ellipsis">${esc(c.name)}</span><span class="muted small">${esc(getPlan(c.planId)?.name || 'sin tarifa')} · ${ng}${w ? '/' + w : ''} grupo(s)</span></label>`;
-    }).join('') || '<div class="empty">No quedan clientes por añadir.</div>'}</div>
-    ${addNotify(false, true)}
-    <button class="btn primary" data-a="group-add" data-id="${t.id}">Añadir seleccionados al grupo</button>
-    <p class="muted small">Se le reservan ya las próximas clases de este horario y, a partir de ahí, todas las semanas.</p>
-    ${next ? `<div class="modal-actions"><button class="btn" data-a="session-open" data-id="${next.id}">Ver próxima clase (${fmtDateShort(next.date)})</button></div>` : ''}`);
+    </div>`, 'wide');
 }
 function openGroupRemove(slotId, userId) {
   const t = getSlot(slotId), u = getUser(userId);
@@ -963,8 +985,18 @@ function openClient(id) {
   const lim = weeklyLimitFor(c);
   const attended = db.bookings.filter(b => b.userId === id && attendStatus(b) === 'attended').length;
   const noshow = db.bookings.filter(b => b.userId === id && b.status === 'noshow').length;
-  openModal(`${modalHead(esc(c.name))}
-    <p class="muted" style="margin-top:-8px">${esc(c.email)}${c.phone ? ' · ' + esc(c.phone) : ''}</p>
+  const pays = (db.payments || []).filter(x => x.userId === id).sort((a, b) => String(b.month).localeCompare(String(a.month))).slice(0, 6);
+  openModal(`<div class="cl-head">
+      <div class="avatar" style="width:56px;height:56px;font-size:20px">${initials(c.name)}</div>
+      <div class="grow"><h2 style="margin:0">${esc(c.name)}</h2>
+        <div class="muted small">${[c.email ? esc(c.email) : 'sin correo', c.phone ? esc(c.phone) : '', c.createdAt ? 'alta ' + fmtDateShort(String(c.createdAt).slice(0, 10)) + ' ' + String(c.createdAt).slice(0, 4) : ''].filter(Boolean).join(' · ')}</div>
+        <div class="row wrap" style="gap:6px;margin-top:6px">
+          <span class="pill ${ps.ok ? 'ok' : 'danger'}">${p ? esc(p.name) : 'Sin tarifa'}</span>
+          ${c.paymentDue ? '<span class="pill warn">💶 Cuota pendiente</span>' : '<span class="pill ok">Cuota al día</span>'}
+          ${c.blocked ? '<span class="pill danger">🔒 Bloqueado</span>' : ''}${!c.active ? '<span class="pill">Cuenta desactivada</span>' : ''}
+          ${groupsOf(c.id).length ? `<span class="pill">${groupsOf(c.id).length} grupo(s) fijo(s)</span>` : ''}</div></div>
+      <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
+    </div>
     ${c.blocked ? `<div class="card row between wrap" style="background:var(--danger-bg);border-color:transparent;margin-bottom:12px">
         <div><b style="color:var(--danger)">🔒 Bloqueado</b><div class="small">${esc(c.blockedReason || 'Sin motivo')}</div></div>
         <button class="btn ok" data-a="client-unblock" data-id="${c.id}">Desbloquear</button></div>` : ''}
@@ -977,6 +1009,7 @@ function openClient(id) {
       ${!c.paymentDue ? `<button class="btn" data-a="pay-due" data-id="${c.id}">💶 Cuota pendiente</button>` : ''}
       ${!c.blocked ? `<button class="btn danger" data-a="client-block" data-id="${c.id}">🔒 Bloquear (impago)</button>` : ''}
     </div>
+    <div class="cl-cols"><div class="cl-main">
     <div class="section-h" style="margin-top:4px">Grupos fijos (${groupsOf(c.id).length}${isWeekly(c) ? ` · tarifa de ${getPlan(c.planId).perWeek} por semana` : ''})</div>
     <div class="card list" style="margin-bottom:8px">${groupsOf(c.id).map(t => `<div class="list-item"><span class="swatch" style="--c:${slotColor(t)}"></span>
       <div class="grow">${esc(slotLabel(t))}</div>
@@ -991,6 +1024,14 @@ function openClient(id) {
       <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
       <span class="pill ${b.status === 'waitlist' ? 'warn' : 'ok'}">${b.status === 'waitlist' ? 'Espera nº ' + waitlistPosition(b) : 'Reservada'}</span>
       <button class="btn sm ghost" data-a="admin-unbook" data-id="${b.id}" title="Quitar">${icon('x', 'width="16" height="16"')}</button></div>`).join('') : '<div class="empty">Sin clases próximas.</div>'}</div>
+    <div class="section-h">Historial</div>
+    <div class="card list">${hist.length ? hist.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
+      <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
+      <span class="pill ${attendStatus(b) === 'attended' ? 'ok' : b.status === 'noshow' ? 'danger' : ''}">${{ booked: 'Reservada', waitlist: 'En espera', attended: '✓ Asistió', noshow: '✗ No vino' }[attendStatus(b)]}</span></div>`).join('') : '<div class="empty">Sin reservas.</div>'}</div>
+    </div><div class="cl-side">
+    <div class="grid-stats" style="grid-template-columns:1fr 1fr;margin:4px 0 12px">
+      <div class="card stat"><div class="v">${attended}</div><div class="l">Asistencias</div></div>
+      <div class="card stat"><div class="v">${noshow}</div><div class="l">Faltas</div></div></div>
     <div class="card" style="margin-bottom:12px">
       <div class="row between"><div><div class="muted small">Tarifa actual</div><b>${p ? esc(p.name) : 'Sin tarifa'}</b></div>
         <div style="text-align:right"><span class="pill ${ps.ok ? 'ok' : 'danger'}">${ps.ok ? 'Activa' : 'Inactiva'}</span><div class="muted small">Cuota de ${monthName()}: ${c.paymentDue ? '💶 pendiente' : '✅ al día'}</div></div></div>
@@ -1012,7 +1053,7 @@ function openClient(id) {
       </div>`}
       <div class="row" style="margin-top:12px"><select class="search" style="margin:0" id="plan-sel">${db.plans.map(pl => `<option value="${pl.id}">${esc(pl.name)} · ${pl.price} €</option>`).join('')}</select>
         <button class="btn primary" data-a="assign-plan" data-id="${c.id}">Asignar / renovar</button></div>
-      <p class="muted small" style="margin:6px 0 0">Asignar o renovar la tarifa reinicia la fecha de caducidad. El cobro se hace en el centro.</p>
+      <p class="muted small" style="margin:6px 0 0">Las cuotas se apuntan en Pagos.</p>
       <div class="row wrap ${isWeekly(c) ? 'hidden' : ''}" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
         <div class="grow"><div class="muted small">Máximo de clases por semana</div><b>${lim ? lim : 'Sin límite'}</b> <span class="muted small">${c.weeklyLimit == null ? '(general del centro)' : '(personalizado)'}</span></div>
         <input type="number" min="0" max="30" style="width:80px" class="search" id="wl-input" placeholder="—" value="${c.weeklyLimit ?? ''}">
@@ -1020,18 +1061,15 @@ function openClient(id) {
       </div>
       <p class="muted small ${isWeekly(c) ? 'hidden' : ''}" style="margin:4px 0 0">Déjalo vacío para usar el límite general (Ajustes). 0 = sin límite.</p>
     </div>
-    <div class="grid-stats" style="grid-template-columns:1fr 1fr;margin-bottom:6px">
-      <div class="card stat"><div class="v">${attended}</div><div class="l">Asistencias</div></div>
-      <div class="card stat"><div class="v">${noshow}</div><div class="l">Faltas</div></div></div>
-    <div class="section-h">Historial</div>
-    <div class="card list">${hist.length ? hist.map(({ b, s }) => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
-      <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
-      <span class="pill ${attendStatus(b) === 'attended' ? 'ok' : b.status === 'noshow' ? 'danger' : ''}">${{ booked: 'Reservada', waitlist: 'En espera', attended: '✓ Asistió', noshow: '✗ No vino' }[attendStatus(b)]}</span></div>`).join('') : '<div class="empty">Sin reservas.</div>'}</div>
+    <div class="section-h row between"><span>Últimos pagos</span><button class="btn sm ghost" data-a="pay-open" data-id="${c.id}" data-m="${monthKey()}">💶 Cobrar ${monthName()}</button></div>
+    <div class="card list">${pays.length ? pays.map(x => `<div class="list-item"><div class="grow"><b>${capFirst(monthName(x.month))} ${x.month.slice(0, 4)}</b><div class="muted small">${x.status === 'absent' ? 'No vino ese mes' : `${esc(x.method || '')} · ${fmtPayDate(x.paidAt)}`}</div></div>
+      ${x.status === 'absent' ? '<span class="pill">🏖</span>' : `<b>${euro(x.total)}</b>`}</div>`).join('') : '<div class="empty">Sin pagos apuntados.</div>'}</div>
+    </div></div>
     <div class="modal-actions">
       <button class="btn" data-a="client-data" data-id="${c.id}" title="Por si te pide una copia de sus datos (RGPD)">⬇️ Sus datos</button>
       <button class="btn ghost danger" data-a="erasure-delete" data-id="${c.id}" title="Por si te pide que borres sus datos (RGPD). Los cobros se conservan.">🗑 Borrar sus datos</button>
       <button class="btn" data-a="client-toggle" data-id="${c.id}">${c.active ? 'Desactivar cuenta' : 'Activar cuenta'}</button>
-      <button class="btn primary" data-a="client-edit" data-id="${c.id}">Editar datos</button></div>`);
+      <button class="btn primary" data-a="client-edit" data-id="${c.id}">Editar datos</button></div>`, 'wide');
 }
 
 function openClientForm(id, prefill = null, prospectId = '') {

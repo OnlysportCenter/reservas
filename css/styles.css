@@ -303,6 +303,17 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .sx-cols { display: grid; grid-template-columns: 1fr; gap: 16px; }
 @media (min-width: 820px) { .sx-cols { grid-template-columns: minmax(0, 1fr) 290px; } .sx-side { margin-top: 38px; } }
 .sx-side { display: flex; flex-direction: column; gap: 12px; }
+.sx-cols > * { min-width: 0; }
+.fields-2 > * { min-width: 0; }
+.fields-2 input { min-width: 0; max-width: 100%; }
+.sx-member .sx-name.clickable { cursor: pointer; }
+.sx-member .sx-name.clickable:hover { text-decoration: underline; }
+/* Ficha del cliente (ventana grande en dos columnas) */
+.cl-head { display: flex; gap: 14px; align-items: flex-start; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.cl-head h2 { font-size: 22px; }
+.cl-cols { display: grid; grid-template-columns: 1fr; gap: 6px 20px; }
+@media (min-width: 820px) { .cl-cols { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); } }
+.cl-main, .cl-side { min-width: 0; }
 .sx-list { padding: 0; }
 .sx-member { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .sx-member:last-child { border-bottom: 0; }
