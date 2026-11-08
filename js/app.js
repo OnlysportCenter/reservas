@@ -393,20 +393,12 @@ function viewProfile() {
         return `<button class="${cur === v ? 'on' : ''}" data-a="theme-pref" data-v="${v}"><span>${ic}</span>${l}</button>`;
       }).join('')}</div>
     </div>
-    <div class="card" style="margin-top:12px">
-      <b>Tus datos</b> <span class="muted small">· tus derechos (RGPD)</span>
-      <p class="muted small" style="margin:6px 0 10px">Puedes descargar una copia de todo lo que tenemos de ti, o pedir que lo borremos.${u.erasureRequestedAt ? '' : ' Para corregir algo, díselo al centro.'}</p>
-      <div class="row wrap" style="gap:8px">
-        <button class="btn sm" data-a="my-data">⬇️ Descargar mis datos</button>
-        ${u.erasureRequestedAt ? `<span class="pill warn">Pediste borrar tus datos el ${fmtDateShort(String(u.erasureRequestedAt).slice(0, 10))}</span>` : '<button class="btn sm ghost danger" data-a="erase-me">Pedir que borren mis datos</button>'}
-      </div>
-    </div>
     <button class="btn block" style="margin-top:16px" data-a="logout">${icon('out', 'width="18" height="18"')}Cerrar sesión</button>
     <p style="text-align:center;margin-top:14px"><button class="legal-link" data-a="privacy">Privacidad y tus datos</button></p>`;
 }
-// Derecho de acceso y portabilidad: el socio se descarga sus datos en un archivo
-async function downloadMyData() {
-  const u = me();
+// Derecho de acceso y portabilidad: el centro descarga los datos de un socio para enviárselos
+async function downloadMyData(userId = state.userId) {
+  const u = getUser(userId);
   const pays = await myPayments(u.id);
   const data = {
     descargado: new Date().toISOString(), centro: db.settings.centerName,
@@ -419,20 +411,12 @@ async function downloadMyData() {
   };
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-  a.download = `mis-datos-${(db.settings.centerName || 'centro').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
+  a.download = `datos-${norm2(u.name).replace(/[^a-z0-9]+/g, '-')}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-// (con servidor las sustituye remote.js)
+// Cobros del socio para la copia (solo los descarga el administrador)
 async function myPayments(userId) { return (db.payments || []).filter(p => p.userId === userId); }
-function requestErasure(userId) {
-  const u = getUser(userId);
-  if (u.erasureRequestedAt) return { ok: true, msg: 'Ya habías pedido que borremos tus datos: el centro lo está gestionando.' };
-  u.erasureRequestedAt = new Date().toISOString();
-  db.emails.push({ id: uid(), userId, to: legal().email, subject: 'Solicitud de borrado de datos', body: `${u.name} (${u.email}) ha pedido desde la app que se borren sus datos.`, date: new Date().toISOString() });
-  saveDB();
-  return { ok: true, msg: 'Solicitud enviada. El centro borrará tus datos (salvo los que la ley obliga a conservar, como los cobros) y te avisará.' };
-}
 
 // ---------- Aviso al llegar una notificación nueva ----------
 // La primera vez (al entrar) solo se apunta lo que hay; después, cada aviso nuevo sale arriba, vibra
@@ -500,7 +484,7 @@ function privacyHTML() {
     <h3>Menores</h3>
     <p>Los menores de 14 años necesitan el consentimiento de su padre, madre o tutor para usar la app.</p>
     <h3>Tus derechos</h3>
-    <p>Puedes ver, corregir o borrar tus datos, oponerte a su uso, pedir que se limite, llevártelos (portabilidad) y retirar tu consentimiento en cualquier momento. Desde la app, en <b>Perfil → Tus datos</b>, puedes descargar una copia de todo y pedir que se borre; para lo demás, ${contact}. Te respondemos en un plazo máximo de un mes.</p>
+    <p>Puedes ver, corregir o borrar tus datos, oponerte a su uso, pedir que se limite, llevártelos (portabilidad) y retirar tu consentimiento en cualquier momento. Para cualquiera de ellos, díselo al centro en persona o ${contact}. Te respondemos en un plazo máximo de un mes.</p>
     <p>Si crees que no tratamos bien tus datos, puedes reclamar ante la Agencia Española de Protección de Datos (<b>aepd.es</b>).</p>
   </div>`;
 }
@@ -544,12 +528,6 @@ function viewAdminToday() {
     </div>
     <div class="section-h">Clases de hoy</div>
     <div class="stack">${ss.length ? ss.map(adminSessionCard).join('') : '<div class="card empty">Hoy no hay clases.</div>'}</div>
-    ${(() => { const req = realClients().filter(c => c.erasureRequestedAt); return req.length ? `<div class="card erasure-card" style="margin-top:14px">
-      <b>🗑 ${req.length === 1 ? 'Un socio ha pedido' : `${req.length} socios han pedido`} que borres sus datos</b>
-      <div class="muted small" style="margin:4px 0 8px">Derecho de supresión (RGPD): tienes <b>un mes</b> desde la solicitud. Los cobros se conservan por contabilidad.</div>
-      <div class="list">${req.map(c => { const days = Math.floor((Date.now() - new Date(c.erasureRequestedAt)) / 86400000); return `<div class="list-item" style="flex-wrap:wrap">
-        <div class="grow"><b>${esc(c.name)}</b><div class="muted small">Pedido hace ${days} ${days === 1 ? 'día' : 'días'}${days >= 25 ? ' · <b style="color:var(--danger)">¡se acaba el plazo!</b>' : ''}</div></div>
-        <button class="btn sm" data-a="client-open" data-id="${c.id}">Ver ficha</button><button class="btn sm danger" data-a="erasure-delete" data-id="${c.id}">Borrar sus datos</button></div>`; }).join('')}</div></div>` : ''; })()}
     ${paymentSummaryHTML()}
     ${(db.prospects || []).length ? `<div class="card row between wrap" style="margin-top:14px">
       <div><b>📝 ${db.prospects.length} ${db.prospects.length === 1 ? 'persona espera' : 'personas esperan'} plaza</b><div class="muted small">Lista de espera de clientes nuevos</div></div>
@@ -1050,6 +1028,8 @@ function openClient(id) {
       <div class="grow">${esc(getClassType(s.classTypeId).name)}<div class="muted small">${fmtDateShort(s.date)} · ${s.time}</div></div>
       <span class="pill ${attendStatus(b) === 'attended' ? 'ok' : b.status === 'noshow' ? 'danger' : ''}">${{ booked: 'Reservada', waitlist: 'En espera', attended: '✓ Asistió', noshow: '✗ No vino' }[attendStatus(b)]}</span></div>`).join('') : '<div class="empty">Sin reservas.</div>'}</div>
     <div class="modal-actions">
+      <button class="btn" data-a="client-data" data-id="${c.id}" title="Por si te pide una copia de sus datos (RGPD)">⬇️ Sus datos</button>
+      <button class="btn ghost danger" data-a="erasure-delete" data-id="${c.id}" title="Por si te pide que borres sus datos (RGPD). Los cobros se conservan.">🗑 Borrar sus datos</button>
       <button class="btn" data-a="client-toggle" data-id="${c.id}">${c.active ? 'Desactivar cuenta' : 'Activar cuenta'}</button>
       <button class="btn primary" data-a="client-edit" data-id="${c.id}">Editar datos</button></div>`);
 }
@@ -1330,9 +1310,8 @@ const actions = {
   'mine-tab': d => { state.mineTab = d.t; render(); },
   privacy: () => openPrivacy(),
   'theme-pref': d => { setThemePref(d.v); render(); },
-  'my-data': async (d, el) => { el.disabled = true; try { await downloadMyData(); toast('Descargado: es un archivo con todos tus datos', 'ok'); } catch (e) { toast('No se pudo descargar', 'err'); } el.disabled = false; },
-  'erase-me': () => confirmModal('Borrar mis datos', 'El centro borrará tu ficha, tus reservas y tus avisos, y ya no podrás entrar en la app. Los cobros se guardan unos años porque la ley obliga (contabilidad). ¿Quieres pedirlo?', 'data-a="erase-me-ok"', 'Sí, pedirlo'),
-  'erase-me-ok': async () => { closeModal(); const r = await requestErasure(state.userId); toast(r.msg, r.ok ? 'ok' : 'err'); render(); },
+  // el administrador descarga los datos de un socio para enviárselos
+  'client-data': async (d, el) => { el.disabled = true; try { await downloadMyData(d.id); toast('Descargado: envíaselo por correo (tienes un mes desde que te lo pidió)', 'ok'); } catch (e) { toast('No se pudo descargar', 'err'); } el.disabled = false; },
   'erasure-delete': d => confirmModal('Borrar sus datos', `Se borrará la ficha de ${esc(getUser(d.id)?.name || '')}, con sus reservas, grupos y avisos. Sus cobros se conservan (con su nombre) por obligación contable. No se puede deshacer.`, `data-a="erasure-delete-ok" data-id="${d.id}"`, 'Borrar sus datos'),
   'erasure-delete-ok': d => { const sess = new Set(db.bookings.filter(b => b.userId === d.id).map(b => b.sessionId)); purgeClients([d.id]); sess.forEach(s => { if (getSession(s)) promoteWaitlist(s); }); saveDB(); closeModal(); toast('Datos borrados', 'ok'); render(); },
   // modo claro / oscuro del panel: se guarda solo en este ordenador
