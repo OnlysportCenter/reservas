@@ -1186,7 +1186,65 @@ function openClassTypeForm(id) {
     </form>`);
 }
 
+// Crear un turno nuevo (ventana grande): a la izquierda cómo es el turno, a la derecha quién va
+function openTurnForm() {
+  const col = TURN_COLORS[db.schedule.length ? new Set(db.schedule.map(t => t.time)).size % TURN_COLORS.length : 0];
+  const ct0 = db.classTypes[0];
+  const people = realClients().filter(c => c.active).sort((a, b) => a.name.localeCompare(b.name));
+  openModal(`
+    <div class="modal-h"><h2>➕ Nuevo turno</h2><button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button></div>
+    <form data-form="slot" class="turn-form">
+      <div class="sx-cols turn-cols">
+        <div>
+          <div class="section-h" style="margin-top:0">Cómo es el turno</div>
+          <div class="field"><label>Tipo de clase</label><select name="classTypeId">${db.classTypes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>Días de la semana</label>
+            <div class="row wrap" style="gap:6px">${[1, 2, 3, 4, 5, 6, 0].map(w => `<label class="tab-radio"><input type="checkbox" name="wd" value="${w}" data-turn-day><span>${DOW_LONG[w]}</span></label>`).join('')}</div>
+            <div class="row wrap" style="gap:6px;margin-top:6px"><button type="button" class="btn sm ghost" data-a="turn-days" data-d="135">L-X-V</button><button type="button" class="btn sm ghost" data-a="turn-days" data-d="24">M-J</button><button type="button" class="btn sm ghost" data-a="turn-days" data-d="12345">L a V</button></div></div>
+          <div class="fields-2">
+            <div class="field"><label>Hora de inicio</label><input name="time" type="time" required value="18:00"></div>
+            <div class="field"><label>Plazas</label><input name="capacity" type="number" min="1" max="200" value="${ct0?.capacity ?? 20}" data-turn-cap></div>
+          </div>
+          <div class="field"><label>Color del turno</label>
+            <div class="row wrap">${colorSwatches(col, 'new-color')}
+              <input type="color" name="color" id="new-color-custom" value="${col}" style="width:44px;height:32px;padding:2px;border-radius:8px;border:1px solid var(--border)"></div></div>
+          <div class="fields-2">
+            <div class="field"><label>Temporada: desde</label><input name="from" type="month" value="${dateKey(new Date()).slice(0, 7)}"></div>
+            <div class="field"><label>Hasta</label><input name="to" type="month" value="${defaultSeasonEnd().slice(0, 7)}"></div>
+          </div>
+          <div class="field"><label>Días que lo ven los socios antes</label><input name="visibleDays" type="number" min="0" max="120" placeholder="Lo general: ${db.settings.bookWindowDays} días"></div>
+          <p class="muted small" style="margin-top:-4px">Se repite todas las semanas de esos meses. Deja «Hasta» vacío si no tiene fin. Todo se puede cambiar luego.</p>
+        </div>
+        <div>
+          <div class="section-h row between" style="margin-top:0"><span>Socios del turno</span><span id="turn-count">0 elegidos</span></div>
+          <input class="search" placeholder="Buscar socio…" data-filter="#turn-people .multi-item" style="margin-bottom:6px">
+          <label class="check small" style="margin-bottom:6px"><input type="checkbox" data-filter-nogroup="#turn-people .multi-item"> Mostrar solo los que no tienen ningún grupo</label>
+          <div class="multi-list" id="turn-people" style="max-height:46vh">${people.map(c => {
+            const ng = groupsOf(c.id).length, w = isWeekly(c) ? getPlan(c.planId).perWeek : null;
+            return `<label class="multi-item" data-search="${esc(norm2(c.name + ' ' + (c.email || '')))}" data-groups="${ng}"><input type="checkbox" name="gnew" value="${c.id}">
+              <span class="grow ellipsis">${esc(c.name)}</span><span class="muted small">${esc(getPlan(c.planId)?.name || 'sin tarifa')} · ${ng}${w ? '/' + w : ''} grupo(s)</span></label>`;
+          }).join('') || '<div class="empty">No hay socios activos.</div>'}</div>
+          <p class="small" id="turn-warn" style="margin:6px 0 0"></p>
+          <div class="small" style="margin-top:6px">${addNotify(false, false)}</div>
+          <p class="muted small" style="margin:4px 0 0">Opcional: también puedes crear el turno vacío y meter a la gente después.</p>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn" data-a="close">Cancelar</button><button class="btn primary" type="submit">Crear turno</button></div>
+    </form>`, 'wide');
+}
+// contador de elegidos y aviso si se pasa de plazas
+function turnFormUpdate() {
+  const f = document.querySelector('.turn-form'); if (!f) return;
+  const n = f.querySelectorAll('input[name="gnew"]:checked').length, cap = Number(f.capacity.value) || 0;
+  const days = f.querySelectorAll('input[name="wd"]:checked').length;
+  const cnt = $('#turn-count'); if (cnt) cnt.textContent = `${n} elegido${n === 1 ? '' : 's'}${cap ? ` · ${cap} plazas` : ''}`;
+  const w = $('#turn-warn'); if (w) w.innerHTML = n > cap && cap ? `<span style="color:var(--danger)">⚠️ Has elegido ${n} y el turno tiene ${cap} plazas.</span>` : !days ? '<span class="muted">Marca los días del turno.</span>' : '';
+}
+document.addEventListener('change', e => { if (e.target.closest?.('.turn-form')) turnFormUpdate(); });
+document.addEventListener('input', e => { if (e.target.matches?.('[data-turn-cap]')) turnFormUpdate(); });
+
 function openSlotForm(oneOff = false) {
+  if (!oneOff) return openTurnForm();
   openModal(`${modalHead(oneOff ? 'Añadir clase extra' : 'Añadir horario semanal')}
     <form data-form="${oneOff ? 'oneoff' : 'slot'}">
       <div class="field"><label>Tipo de clase</label><select name="classTypeId">${db.classTypes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></div>
@@ -1589,6 +1647,7 @@ const actions = {
   // Admin: horario
   'sched-tab': d => { state.schedTab = d.t; render(); },
   'slot-add': () => openSlotForm(false),
+  'turn-days': d => { const f = document.querySelector('.turn-form'); if (!f) return; f.querySelectorAll('input[name="wd"]').forEach(i => { i.checked = d.d.includes(i.value); }); turnFormUpdate(); },
   'slot-del': d => confirmModal('Quitar horario', 'Se eliminarán las próximas clases de este horario. Si hay clientes apuntados se les avisará y se les devolverá la clase.', `data-a="slot-del-ok" data-id="${d.id}"`, 'Quitar'),
   'slot-del-ok': d => { removeScheduleSlot(d.id); closeModal(); render(); },
   'ct-edit': d => openClassTypeForm(d.id),
@@ -1655,8 +1714,11 @@ const forms = {
     const from = f.get('from'), to = f.get('to'), vd = String(f.get('visibleDays') || '').trim();
     const season = { startDate: from ? from + '-01' : null, endDate: to ? monthLastDay(to) : null, visibleDays: vd === '' ? null : Math.max(0, Number(vd)), color: f.get('color') || null };
     if (season.startDate && season.endDate && season.endDate < season.startDate) return toast('«Hasta» no puede ser antes que «Desde»', 'err');
-    wds.forEach(w => addScheduleSlot(w, f.get('time'), f.get('classTypeId'), cap && cap !== ct.capacity ? cap : null, season));
-    toast('Horario añadido', 'ok'); closeModal(); render();
+    const ids = wds.map(w => addScheduleSlot(w, f.get('time'), f.get('classTypeId'), cap && cap !== ct.capacity ? cap : null, season));
+    // socios elegidos: entran en el grupo de cada día y se les reservan sus clases
+    const people = f.getAll('gnew'); const nt = readNotify();
+    people.forEach(uid_ => ids.forEach(sid => addGroupMember(sid, uid_, nt)));
+    toast(`Turno creado (${wds.length} ${wds.length === 1 ? 'día' : 'días'})${people.length ? ` con ${people.length} socio${people.length === 1 ? '' : 's'}` : ''}`, 'ok'); closeModal(); render();
   },
   multiadd: (f, form) => {
     const ids = f.getAll('sid');

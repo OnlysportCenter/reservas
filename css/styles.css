@@ -304,6 +304,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 @media (min-width: 820px) { .sx-cols { grid-template-columns: minmax(0, 1fr) 290px; } .sx-side { margin-top: 38px; } }
 .sx-side { display: flex; flex-direction: column; gap: 12px; }
 .sx-cols > * { min-width: 0; }
+@media (min-width: 820px) { .turn-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; } }
 .fields-2 > * { min-width: 0; }
 .fields-2 input { min-width: 0; max-width: 100%; }
 .sx-member .sx-name.clickable { cursor: pointer; }

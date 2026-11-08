@@ -599,8 +599,10 @@ function updateSessionCapacity(sessionId, cap) { getSession(sessionId).capacity 
 
 // ---------- Horario semanal ----------
 function addScheduleSlot(weekday, time, classTypeId, capacity = null, { startDate = null, endDate = null, visibleDays = null, color = null } = {}) {
-  db.schedule.push({ id: uid(), weekday, time, classTypeId, members: [], capacity, startDate, endDate, visibleDays, color });
+  const id = uid();
+  db.schedule.push({ id, weekday, time, classTypeId, members: [], capacity, startDate, endDate, visibleDays, color });
   ensureSessions(); saveDB();
+  return id;
 }
 // Cambiar temporada y antelación de un turno: quita las clases que quedan fuera y crea las que entran
 function setSlotSeason(slotId, { startDate = null, endDate = null, visibleDays = null }, { ensure = true } = {}) {
