@@ -108,6 +108,9 @@ function viewPayQuotas() {
           return [...groups].filter(([, cs]) => cs.length).map(([k, cs]) => `<div class="section-h row between"><span>🕘 ${esc(seen.get(k).label)}</span><span>${cs.length}</span></div><div class="card list">${cs.map(row).join('')}</div>`).join('')
             + (none.length ? `<div class="section-h row between"><span>Sin turno fijo</span><span>${none.length}</span></div><div class="card list">${none.map(row).join('')}</div>` : '');
         })()}
+    ${(() => { const gone = paymentsIn(mk).filter(p => !p.userId && p.status === 'paid'); return gone.length ? `<div class="section-h">Cobros de personas ya dadas de baja (${gone.length})</div>
+      <div class="card list">${gone.map(p => `<div class="list-item"><div class="grow"><b>${esc(p.payerName || 'Socio borrado')}</b><div class="muted small">Se conserva por contabilidad aunque se borró su ficha</div></div>
+        <span class="pay-pill paid"><b>${euro(p.total)}</b> · ${esc(p.method)} · ${fmtPayDate(p.paidAt)}</span></div>`).join('')}</div>` : ''; })()}
     <div class="section-h">Resumen de ${year} · total ${euro(yearSum)}</div>
     <div class="card year-chart">${yearTotals.map(({ m, t }) => `<button class="yc-col ${m === mk ? 'on' : ''}" data-a="pay-month-set" data-m="${m}" title="${monthLabel(m)}: ${euro(t)}">
       <span class="yc-v">${t ? Math.round(t) + '€' : ''}</span><span class="yc-bar"><i style="height:${Math.round(t / maxT * 100)}%"></i></span><span class="yc-m">${MONTHS[Number(m.slice(5)) - 1]}</span></button>`).join('')}</div>`;
@@ -161,6 +164,9 @@ function exportPaymentsMonth(mk) {
     rows.push([c.name, c.email, c.phone, getPlan(c.planId)?.name || '', !p ? 'Pendiente' : p.status === 'absent' ? 'No viene' : 'Pagado',
       p?.paidAt ? String(p.paidAt).slice(0, 10) : '', p?.method || '', p?.status === 'paid' ? num(p.base) : '', p?.status === 'paid' ? num(p.total - p.base) : '', p?.status === 'paid' ? num(p.total) : '', p?.note || '']);
   });
+  // cobros de personas que ya no están dadas de alta (se conservan por contabilidad)
+  paymentsIn(mk).filter(p => !p.userId && p.status === 'paid').forEach(p => rows.push([`${p.payerName || 'Socio borrado'} (de baja)`, '', '', '', 'Pagado',
+    p.paidAt ? String(p.paidAt).slice(0, 10) : '', p.method || '', num(p.base), num(p.total - p.base), num(p.total), p.note || '']));
   const s = monthSummary(mk);
   rows.push([], ['TOTAL COBRADO', '', '', '', '', '', '', num(s.base), num(s.ivaTotal), num(s.total)]);
   Object.entries(s.byMethod).forEach(([m, t]) => rows.push([`Total ${m}`, '', '', '', '', '', '', '', '', num(t)]));
@@ -375,9 +381,9 @@ function viewCashDay() {
     ${cashKpis(s)}
     ${methodChips(s.byMethod)}
     <div class="section-h">Cuotas cobradas este día (${pays.length})</div>
-    <div class="card list">${pays.length ? pays.map(p => { const u = getUser(p.userId); return `<div class="list-item clickable" data-a="pay-open" data-id="${p.userId}" data-m="${p.month}">
-      <div class="avatar">${initials(u?.name || '?')}</div>
-      <div class="grow"><div class="ellipsis" style="font-weight:600">${esc(u?.name || 'Socio borrado')}</div><div class="muted small">Cuota de ${monthName(p.month)}${p.month.slice(0, 4) !== day.slice(0, 4) ? ' ' + p.month.slice(0, 4) : ''}${p.iva ? ' · con IVA' : ''}</div></div>
+    <div class="card list">${pays.length ? pays.map(p => { const u = getUser(p.userId); const nm = u?.name || p.payerName || 'Socio borrado'; return `<div class="list-item ${u ? 'clickable' : ''}" ${u ? `data-a="pay-open" data-id="${p.userId}" data-m="${p.month}"` : 'title="Ya no está dado de alta: el cobro se conserva por contabilidad"'}>
+      <div class="avatar">${initials(nm)}</div>
+      <div class="grow"><div class="ellipsis" style="font-weight:600">${esc(nm)}${u ? '' : ' <span class="pill">de baja</span>'}</div><div class="muted small">Cuota de ${monthName(p.month)}${p.month.slice(0, 4) !== day.slice(0, 4) ? ' ' + p.month.slice(0, 4) : ''}${p.iva ? ' · con IVA' : ''}</div></div>
       <span class="pill">${esc(p.method)}</span><b style="min-width:80px;text-align:right">${euro(p.total)}</b></div>`; }).join('')
       : '<div class="empty">Sin cuotas cobradas este día. Las que registres en «Cuotas» aparecen aquí según su fecha de pago.</div>'}</div>
     <div class="section-h">Otros movimientos de caja (${moves.length})</div>
@@ -458,7 +464,7 @@ function exportCashMonth(mk) {
   const num = n => String(round2(n)).replace('.', ',');
   const rows = [['Fecha', 'Tipo', 'Concepto', 'Forma de pago', 'Importe', 'IVA', 'Total']];
   const items = [
-    ...db.payments.filter(p => p.status === 'paid' && String(p.paidAt || '').startsWith(mk)).map(p => [String(p.paidAt).slice(0, 10), 'Cuota', `${getUser(p.userId)?.name || '?'} · cuota ${monthName(p.month)}`, p.method, p.base, round2(p.total - p.base), p.total]),
+    ...db.payments.filter(p => p.status === 'paid' && String(p.paidAt || '').startsWith(mk)).map(p => [String(p.paidAt).slice(0, 10), 'Cuota', `${getUser(p.userId)?.name || p.payerName || '?'} · cuota ${monthName(p.month)}`, p.method, p.base, round2(p.total - p.base), p.total]),
     ...db.cashMoves.filter(m => String(m.date).startsWith(mk)).map(m => [String(m.date).slice(0, 10), m.amount < 0 ? 'Gasto' : 'Ingreso', m.concept, m.method, m.base, round2(m.amount - m.base), m.amount]),
   ].sort((a, b) => a[0].localeCompare(b[0]));
   items.forEach(r => rows.push([r[0], r[1], r[2], r[3], num(r[4]), num(r[5]), num(r[6])]));

@@ -765,6 +765,7 @@ function recordPayment(userId, month, { paidAt, method, base, iva, note, status 
   const i = iva == null ? def.iva : !!iva;
   let p = paymentOf(userId, month);
   if (!p) { p = { id: uid(), userId, month, createdAt: new Date().toISOString() }; db.payments.push(p); }
+  p.payerName = u.name;   // se guarda el nombre: el cobro se conserva aunque luego se borre al socio
   Object.assign(p, status === 'absent'
     ? { status: 'absent', paidAt: null, method: '', base: 0, iva: false, total: 0, note: note || '' }
     : { status: 'paid', paidAt: paidAt || dateKey(new Date()), method: method || p.method || 'Efectivo', base: b, iva: i, total: withIva(b, i), note: note ?? p.note ?? '' });

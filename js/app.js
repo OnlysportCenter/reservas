@@ -155,7 +155,7 @@ function renderLogin() {
       <div class="stack demo-list">${demo.map(u => `<button class="btn block" data-a="login-as" data-id="${u.id}" style="justify-content:flex-start">
         <span class="avatar" style="width:28px;height:28px;font-size:11px">${initials(u.name)}</span>${esc(u.name)} <span class="muted small" style="margin-left:auto">${u.role === 'admin' ? 'Administrador' : 'Cliente'}</span></button>`).join('')}</div>
       <p class="muted small" style="margin-top:14px">⚠️ Prototipo: aún sin contraseñas. En la versión real cada cliente tendrá su acceso seguro.</p>
-      <p class="muted small" style="margin:10px 0 0">Usamos tus datos solo para gestionar tus clases. <button class="legal-link" data-a="privacy">Privacidad</button></p>
+      <p class="muted small" style="margin:10px 0 0">Responsable: ${esc(db?.settings?.centerName || 'Onlysport Center')}. Finalidad: gestionar tus clases y cuotas. Derechos: ver, corregir, borrar y llevarte tus datos. <button class="legal-link" data-a="privacy">Más información</button></p>
     </div></div>`;
 }
 
@@ -381,7 +381,7 @@ function viewProfile() {
       ${db.settings.onePerDay ? '· Como máximo una clase al día.<br>' : ''}
       · Tus clases de grupo te las reserva el centro. Si vas a faltar, quítate para dejar la plaza libre.<br>
       · Puedes cambiarte a otra clase con plazas libres, o apuntarte a la lista de espera de varias clases: solo cuenta la primera en la que entres, y si ya no te quedan clases te quitamos de las demás.<br>
-      ${weeklyLimitFor(u) ? `· Puedes reservar como máximo ${weeklyLimitFor(u)} clases por semana (las listas de espera también cuentan).<br>` : ''}
+      ${weeklyLimitFor(u) ? `· Puedes reservar como máximo ${weeklyLimitFor(u)} clases por semana.<br>` : ''}
       · Cancela con al menos ${db.settings.cancelHours} h de antelación para recuperar la clase.<br>
       · Si una clase está llena, apúntate a la lista de espera: entrarás automáticamente si alguien cancela.<br>
       · Te enviaremos un recordatorio ${db.settings.reminderHours} h antes de la clase.
@@ -393,8 +393,45 @@ function viewProfile() {
         return `<button class="${cur === v ? 'on' : ''}" data-a="theme-pref" data-v="${v}"><span>${ic}</span>${l}</button>`;
       }).join('')}</div>
     </div>
+    <div class="card" style="margin-top:12px">
+      <b>Tus datos</b> <span class="muted small">· tus derechos (RGPD)</span>
+      <p class="muted small" style="margin:6px 0 10px">Puedes descargar una copia de todo lo que tenemos de ti, o pedir que lo borremos.${u.erasureRequestedAt ? '' : ' Para corregir algo, díselo al centro.'}</p>
+      <div class="row wrap" style="gap:8px">
+        <button class="btn sm" data-a="my-data">⬇️ Descargar mis datos</button>
+        ${u.erasureRequestedAt ? `<span class="pill warn">Pediste borrar tus datos el ${fmtDateShort(String(u.erasureRequestedAt).slice(0, 10))}</span>` : '<button class="btn sm ghost danger" data-a="erase-me">Pedir que borren mis datos</button>'}
+      </div>
+    </div>
     <button class="btn block" style="margin-top:16px" data-a="logout">${icon('out', 'width="18" height="18"')}Cerrar sesión</button>
     <p style="text-align:center;margin-top:14px"><button class="legal-link" data-a="privacy">Privacidad y tus datos</button></p>`;
+}
+// Derecho de acceso y portabilidad: el socio se descarga sus datos en un archivo
+async function downloadMyData() {
+  const u = me();
+  const pays = await myPayments(u.id);
+  const data = {
+    descargado: new Date().toISOString(), centro: db.settings.centerName,
+    'mis datos': { nombre: u.name, email: u.email, telefono: u.phone, alta: u.createdAt, tarifa: getPlan(u.planId)?.name || null, activo: u.active, bloqueado: !!u.blocked,
+      'cuota del mes': u.paymentDue ? 'pendiente' : 'al día', 'respuesta a la cuota': u.paymentAnswer || null },
+    'mis grupos fijos': groupsOf(u.id).map(slotLabel),
+    'mis reservas': db.bookings.filter(b => b.userId === u.id).map(b => { const s = getSession(b.sessionId); return { clase: s ? classLabel(s) : b.sessionId, estado: b.status, reservada: b.createdAt }; }),
+    'mis pagos': pays.map(p => ({ mes: p.month, estado: p.status === 'absent' ? 'no vino ese mes' : 'pagado', fecha: p.paidAt, forma: p.method, importe: p.total })),
+    'mis avisos': notificationsFor(u.id).map(n => ({ fecha: n.date, texto: n.text, leido: n.read })),
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = `mis-datos-${(db.settings.centerName || 'centro').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+// (con servidor las sustituye remote.js)
+async function myPayments(userId) { return (db.payments || []).filter(p => p.userId === userId); }
+function requestErasure(userId) {
+  const u = getUser(userId);
+  if (u.erasureRequestedAt) return { ok: true, msg: 'Ya habías pedido que borremos tus datos: el centro lo está gestionando.' };
+  u.erasureRequestedAt = new Date().toISOString();
+  db.emails.push({ id: uid(), userId, to: legal().email, subject: 'Solicitud de borrado de datos', body: `${u.name} (${u.email}) ha pedido desde la app que se borren sus datos.`, date: new Date().toISOString() });
+  saveDB();
+  return { ok: true, msg: 'Solicitud enviada. El centro borrará tus datos (salvo los que la ley obliga a conservar, como los cobros) y te avisará.' };
 }
 
 // ---------- Aviso al llegar una notificación nueva ----------
@@ -437,25 +474,34 @@ function privacyHTML() {
     <h3>Responsable</h3>
     <p>${name}${L.nif ? ` · NIF ${esc(L.nif)}` : ''}${L.address ? ` · ${esc(L.address)}` : ''}${L.phone ? ` · Tel. ${esc(L.phone)}` : ''}${L.email ? ` · ${esc(L.email)}` : ''}.</p>
     <h3>Qué datos tratamos</h3>
-    <p>Los que nos diste al apuntarte (nombre, apellidos, email y teléfono), tu tarifa, tus grupos y reservas, tu asistencia, las listas de espera en las que estás, tus respuestas sobre la cuota del mes y los avisos que te enviamos.</p>
+    <p>Los que nos diste al apuntarte (nombre, apellidos, email y teléfono), tu tarifa, tus grupos y reservas, tu asistencia, las listas de espera en las que estás, tus cuotas y pagos (mes, fecha, importe y forma de pago), tus respuestas sobre la cuota del mes y los avisos que te enviamos.</p>
+    <p>Si haces <b>entrenamiento personal</b>, también tus sesiones, ejercicios y cargas. Solo apuntamos datos de salud (lesiones, molestias…) si nos das tu consentimiento expreso, y puedes retirarlo cuando quieras.</p>
     <h3>Para qué</h3>
-    <p>Para reservar tus clases, gestionar las listas de espera, avisarte de cambios (por la app o por correo) y llevar tu relación como socio del centro. No hacemos perfiles ni usamos tus datos para publicidad.</p>
+    <p>Para reservar tus clases, gestionar las listas de espera, avisarte de cambios (por la app o por correo), cobrar las cuotas y llevar la contabilidad del centro. No hacemos perfiles, no tomamos decisiones automáticas sobre ti y no usamos tus datos para publicidad.</p>
     <h3>Base legal</h3>
-    <p>La relación que tienes con el centro como socio (artículo 6.1.b del Reglamento General de Protección de Datos).</p>
+    <p>· La relación que tienes con el centro como socio (art. 6.1.b del Reglamento General de Protección de Datos).<br>
+       · Las obligaciones contables y fiscales, para los cobros (art. 6.1.c).<br>
+       · Tu consentimiento expreso, para los datos de salud del entrenamiento personal (art. 9.2.a).</p>
+    <p>Los datos de contacto son necesarios para darte el servicio: sin ellos no podemos gestionar tus reservas.</p>
     <h3>Quién más los ve</h3>
-    <p>Solo el centro. Los demás socios no ven tu nombre ni tus reservas: solo cuántas plazas quedan libres. No cedemos tus datos a nadie.</p>
-    <p>Para que la app funcione usamos estos proveedores, que tratan los datos por cuenta del centro:</p>
-    <ul><li><b>Supabase</b>: base de datos y acceso con código. Servidores en Fráncfort (Unión Europea).</li>
-      <li><b>GitHub Pages</b> (GitHub Inc.): aloja la app y registra la dirección IP de las visitas por seguridad. Adherido al Marco de Privacidad de Datos UE-EE. UU.</li>
-      <li><b>Google (Gmail)</b>: envía los códigos de acceso y los avisos por correo.</li></ul>
+    <p>Solo el centro. Los demás socios no ven tu nombre ni tus reservas: solo cuántas plazas quedan libres. No cedemos tus datos a nadie, salvo cuando la ley lo exige (por ejemplo, a la Agencia Tributaria).</p>
+    <p>Para que la app funcione usamos estos proveedores, que tratan los datos por cuenta del centro y con contrato de encargado del tratamiento:</p>
+    <ul><li><b>Supabase</b>: base de datos y acceso con código. Servidores en la Unión Europea.</li>
+      <li><b>GitHub Pages</b> (GitHub Inc., EE. UU.): aloja la app y registra la dirección IP de las visitas por seguridad.</li>
+      <li><b>Google</b> (EE. UU.): envía los códigos de acceso y los avisos por correo (Gmail).</li></ul>
+    <p>Todo lo demás (los tipos de letra y las piezas de la app) se descarga desde la propia app: tu móvil no se conecta a ningún otro servicio.</p>
+    <p>Las empresas de EE. UU. están adheridas al Marco de Privacidad de Datos UE-EE. UU., que la Comisión Europea considera adecuado.</p>
     <h3>Cuánto tiempo</h3>
-    <p>Mientras seas socio. Si te das de baja, borramos tus datos de la app, salvo lo que la ley nos obligue a guardar.</p>
+    <p>Mientras seas socio. Si te das de baja, borramos tu ficha, tus reservas y tus avisos. Los cobros los guardamos <b>6 años</b>, porque lo exige la ley (Código de Comercio y normativa fiscal). Además, la app borra sola los avisos con más de 6 meses, los correos con más de 3 meses y el historial de clases con más de 2 años.</p>
     <h3>Tu sesión en el móvil</h3>
-    <p>La app guarda tu sesión en el navegador para no pedirte el código cada vez. No usa cookies de publicidad ni de analítica.</p>
+    <p>La app guarda tu sesión y tus preferencias (como el modo oscuro) en el navegador, solo para funcionar: así no te pide el código cada vez. No usa cookies de publicidad ni de analítica.</p>
     <h3>Personas en lista de espera para apuntarse</h3>
     <p>Si nos dejas tu nombre y tu teléfono o email porque esperas una plaza, solo los usamos para avisarte cuando haya hueco, y los borramos si ya no te interesa.</p>
+    <h3>Menores</h3>
+    <p>Los menores de 14 años necesitan el consentimiento de su padre, madre o tutor para usar la app.</p>
     <h3>Tus derechos</h3>
-    <p>Puedes pedir ver, corregir o borrar tus datos, oponerte a su uso o pedir una copia ${contact}. Si crees que no los tratamos bien, puedes reclamar ante la Agencia Española de Protección de Datos (<b>aepd.es</b>).</p>
+    <p>Puedes ver, corregir o borrar tus datos, oponerte a su uso, pedir que se limite, llevártelos (portabilidad) y retirar tu consentimiento en cualquier momento. Desde la app, en <b>Perfil → Tus datos</b>, puedes descargar una copia de todo y pedir que se borre; para lo demás, ${contact}. Te respondemos en un plazo máximo de un mes.</p>
+    <p>Si crees que no tratamos bien tus datos, puedes reclamar ante la Agencia Española de Protección de Datos (<b>aepd.es</b>).</p>
   </div>`;
 }
 function openPrivacy() { openModal(`${modalHead('Privacidad')}${privacyHTML()}<div class="modal-actions"><button class="btn primary" data-a="close">Entendido</button></div>`); }
@@ -498,6 +544,12 @@ function viewAdminToday() {
     </div>
     <div class="section-h">Clases de hoy</div>
     <div class="stack">${ss.length ? ss.map(adminSessionCard).join('') : '<div class="card empty">Hoy no hay clases.</div>'}</div>
+    ${(() => { const req = realClients().filter(c => c.erasureRequestedAt); return req.length ? `<div class="card erasure-card" style="margin-top:14px">
+      <b>🗑 ${req.length === 1 ? 'Un socio ha pedido' : `${req.length} socios han pedido`} que borres sus datos</b>
+      <div class="muted small" style="margin:4px 0 8px">Derecho de supresión (RGPD): tienes <b>un mes</b> desde la solicitud. Los cobros se conservan por contabilidad.</div>
+      <div class="list">${req.map(c => { const days = Math.floor((Date.now() - new Date(c.erasureRequestedAt)) / 86400000); return `<div class="list-item" style="flex-wrap:wrap">
+        <div class="grow"><b>${esc(c.name)}</b><div class="muted small">Pedido hace ${days} ${days === 1 ? 'día' : 'días'}${days >= 25 ? ' · <b style="color:var(--danger)">¡se acaba el plazo!</b>' : ''}</div></div>
+        <button class="btn sm" data-a="client-open" data-id="${c.id}">Ver ficha</button><button class="btn sm danger" data-a="erasure-delete" data-id="${c.id}">Borrar sus datos</button></div>`; }).join('')}</div></div>` : ''; })()}
     ${paymentSummaryHTML()}
     ${(db.prospects || []).length ? `<div class="card row between wrap" style="margin-top:14px">
       <div><b>📝 ${db.prospects.length} ${db.prospects.length === 1 ? 'persona espera' : 'personas esperan'} plaza</b><div class="muted small">Lista de espera de clientes nuevos</div></div>
@@ -1278,6 +1330,11 @@ const actions = {
   'mine-tab': d => { state.mineTab = d.t; render(); },
   privacy: () => openPrivacy(),
   'theme-pref': d => { setThemePref(d.v); render(); },
+  'my-data': async (d, el) => { el.disabled = true; try { await downloadMyData(); toast('Descargado: es un archivo con todos tus datos', 'ok'); } catch (e) { toast('No se pudo descargar', 'err'); } el.disabled = false; },
+  'erase-me': () => confirmModal('Borrar mis datos', 'El centro borrará tu ficha, tus reservas y tus avisos, y ya no podrás entrar en la app. Los cobros se guardan unos años porque la ley obliga (contabilidad). ¿Quieres pedirlo?', 'data-a="erase-me-ok"', 'Sí, pedirlo'),
+  'erase-me-ok': async () => { closeModal(); const r = await requestErasure(state.userId); toast(r.msg, r.ok ? 'ok' : 'err'); render(); },
+  'erasure-delete': d => confirmModal('Borrar sus datos', `Se borrará la ficha de ${esc(getUser(d.id)?.name || '')}, con sus reservas, grupos y avisos. Sus cobros se conservan (con su nombre) por obligación contable. No se puede deshacer.`, `data-a="erasure-delete-ok" data-id="${d.id}"`, 'Borrar sus datos'),
+  'erasure-delete-ok': d => { const sess = new Set(db.bookings.filter(b => b.userId === d.id).map(b => b.sessionId)); purgeClients([d.id]); sess.forEach(s => { if (getSession(s)) promoteWaitlist(s); }); saveDB(); closeModal(); toast('Datos borrados', 'ok'); render(); },
   // modo claro / oscuro del panel: se guarda solo en este ordenador
   'admin-theme': () => { setThemePref(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); render(); },
   // vuelve a pedir los datos al servidor y redibuja la ventana abierta (clase o grupo)
@@ -1402,7 +1459,7 @@ const actions = {
     const n = state.sel.size; if (!n) return;
     const names = [...state.sel].map(getUser).filter(Boolean).map(u => esc(u.name));
     openModal(`${modalHead(`🗑 Borrar ${n} ${n === 1 ? 'cliente' : 'clientes'}`)}
-      <p>Se borrarán del todo, con sus <b>reservas, grupos fijos, avisos y pagos</b>. No se puede deshacer.</p>
+      <p>Se borrarán del todo, con sus <b>reservas, grupos fijos y avisos</b>. Sus <b>cobros se conservan</b> (con su nombre), porque la contabilidad hay que guardarla 6 años. No se puede deshacer.</p>
       <div class="card list small" style="max-height:30vh;overflow:auto">${names.slice(0, 50).map(x => `<div class="list-item">${x}</div>`).join('')}${names.length > 50 ? `<div class="list-item muted">… y ${names.length - 50} más</div>` : ''}</div>
       <p class="muted small">Si solo quieres que no reserven, mejor «🔒 Bloquear» o «Desactivar cuenta»: así no pierdes su historial.</p>
       <div class="field"><label>Para confirmar, escribe <b>BORRAR</b></label><input id="del-confirm" autocomplete="off"></div>

@@ -72,7 +72,8 @@ function viewPtClient(c) {
       <div class="grow"><h1 style="font-size:22px;margin:0">${esc(ptClientName(c))}</h1>
         <div class="muted small">${[u ? 'Socio del centro' : 'Cliente de personal', c.phone || u?.phone, c.email || u?.email].filter(Boolean).map(esc).join(' · ')}</div>
         ${c.goal ? `<div style="margin-top:6px">🎯 ${esc(c.goal)}</div>` : ''}${c.days ? `<div class="small" style="margin-top:2px">📅 ${esc(c.days)}</div>` : ''}
-        ${c.notes ? `<div class="wk-notes" style="margin-top:8px">📝 ${esc(c.notes).replace(/\n/g, '<br>')}</div>` : ''}</div>
+        ${c.notes ? `<div class="wk-notes" style="margin-top:8px">📝 ${esc(c.notes).replace(/\n/g, '<br>')}</div>` : ''}
+        <div class="small" style="margin-top:6px">${c.healthConsentAt ? `✅ Consentimiento para datos de salud desde el ${fmtPtDate(String(c.healthConsentAt).slice(0, 10))}` : '<span class="muted">Sin consentimiento para datos de salud: no apuntes lesiones ni molestias.</span>'}</div></div>
       <div class="row wrap" style="gap:6px;align-self:flex-start"><button class="btn sm" data-a="pt-edit" data-id="${c.id}">✏️ Editar</button></div>
     </div>
     <div class="row wrap" style="gap:8px;margin:12px 0">
@@ -206,7 +207,10 @@ function openPtClientForm(id) {
         <div class="fields-2"><div class="field"><label>Teléfono</label><input name="phone" value="${esc(c.phone)}"></div><div class="field"><label>Email (opcional)</label><input name="email" type="email" value="${esc(c.email)}"></div></div>`}
       <div class="field"><label>Objetivo</label><input name="goal" value="${esc(c.goal)}" placeholder="p. ej. Perder peso, fuerza, recuperar rodilla…"></div>
       <div class="field"><label>Días que entrena</label><input name="days" value="${esc(c.days)}" placeholder="p. ej. Lunes y jueves 10:00"></div>
-      <div class="field"><label>Notas</label><textarea name="notes" rows="3" placeholder="Lesiones, medidas, lo que te cuente…">${esc(c.notes)}</textarea></div>
+      <label class="check pt-consent"><input type="checkbox" name="healthConsent" ${c.healthConsentAt ? 'checked' : ''}>
+        <span><b>Me ha dado su consentimiento expreso para guardar datos de salud</b> (lesiones, molestias, medicación…)${c.healthConsentAt ? `<br><span class="muted small">Desde el ${fmtPtDate(String(c.healthConsentAt).slice(0, 10))}</span>` : ''}
+        <br><span class="muted small">Los datos de salud son especialmente protegidos (art. 9 RGPD): sin su consentimiento, no los apuntes. Lo ideal es que te lo firme por escrito.</span></span></label>
+      <div class="field"><label>Notas</label><textarea name="notes" rows="3" placeholder="${c.healthConsentAt ? 'Lesiones, medidas, lo que te cuente…' : 'Objetivos, preferencias, horario… (nada de salud sin su consentimiento)'}">${esc(c.notes)}</textarea></div>
       ${id ? `<label class="check"><input type="checkbox" name="active" ${c.active !== false ? 'checked' : ''}> Sigue viniendo a personal</label>` : ''}
       <div class="modal-actions">${id ? `<button type="button" class="btn danger" data-a="pt-del" data-id="${id}" style="margin-right:auto">Borrar</button>` : ''}<button type="button" class="btn" data-a="close">Cancelar</button><button class="btn primary" type="submit">Guardar</button></div>
     </form>`);
@@ -255,7 +259,7 @@ function openPtSession(draft) {
       ${(mine.length || lib.length) ? `<div class="wk-pick"><div class="row between wrap" style="gap:8px"><b class="small">Pulsa para añadir:</b><input class="search" style="margin:0;max-width:220px" placeholder="Buscar…" value="${esc(state.ptPickQ || '')}" data-pt-pickq></div>
         ${mine.length ? `<div class="muted small" style="margin-top:8px">Los que ya ha hecho:</div><div class="wk-chips">${mine.filter(n => !q || norm2(n).includes(q)).map(n => `<button type="button" class="${inList.has(exKey(n)) ? 'used' : ''}" data-a="pt-pick" data-n="${esc(n)}" ${inList.has(exKey(n)) ? 'disabled' : ''}>${esc(n)}</button>`).join('')}</div>` : ''}
         <div class="muted small" style="margin-top:8px">Todos tus ejercicios:</div><div class="wk-chips">${lib.filter(e => !mine.some(n => exKey(n) === exKey(e.name)) && (!q || norm2(e.name).includes(q))).map(e => `<button type="button" data-a="pt-pick" data-n="${esc(e.name)}">${esc(e.name)}</button>`).join('')}</div></div>` : ''}
-      <div class="field" style="margin-top:12px"><label>Observaciones de la sesión</label><textarea name="notes" rows="3" data-pt-f="notes" placeholder="Cómo ha ido, molestias, qué subir la próxima…">${esc(d.notes || '')}</textarea></div>
+      <div class="field" style="margin-top:12px"><label>Observaciones de la sesión</label><textarea name="notes" rows="3" data-pt-f="notes" placeholder="${c.healthConsentAt ? 'Cómo ha ido, molestias, qué subir la próxima…' : 'Cómo ha ido, qué subir la próxima…'}">${esc(d.notes || '')}</textarea></div>
       <div class="modal-actions"><button type="button" class="btn" data-a="pt-sess-cancel">Cancelar</button><button class="btn primary" type="submit">Guardar sesión</button></div>
     </form>`, 'wide');
 }
@@ -522,7 +526,10 @@ Object.assign(forms, {
   'pt-client': (f, form) => {
     const id = form.dataset.id || null;
     const kind = f.get('kind');
-    const data = { goal: f.get('goal').trim(), days: f.get('days').trim(), notes: f.get('notes').trim() };
+    const prev = id ? db.ptClients.find(c => c.id === id) : null;
+    const data = { goal: f.get('goal').trim(), days: f.get('days').trim(), notes: f.get('notes').trim(),
+      // fecha del consentimiento: se guarda la primera vez que se marca; si se desmarca, se quita
+      healthConsentAt: f.get('healthConsent') === 'on' ? (prev?.healthConsentAt || new Date().toISOString()) : null };
     if (kind === 'member') {
       const mid = f.get('memberId'); if (!mid) return toast('Elige un socio', 'err');
       const u = getUser(mid); Object.assign(data, { memberId: mid, name: u.name, phone: '', email: '' });

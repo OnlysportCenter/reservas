@@ -376,6 +376,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .pt-tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.12); border-radius: 10px; padding: 7px 10px; font-size: 12.5px; min-width: 120px; }
 [data-theme="dark"] .pt-chart .ln { stroke: #7FA7D0; } [data-theme="dark"] .pt-chart .pt { fill: #7FA7D0; }
 .pt-rows { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.erasure-card { border-color: var(--danger); background: color-mix(in srgb, var(--danger-bg) 55%, var(--surface)); }
+.pt-consent { align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); line-height: 1.4; }
+.pt-consent input { margin-top: 3px; flex: none; }
 .pt-dict { margin: 4px 0 12px; padding: 12px; border-radius: 12px; border: 1.5px dashed var(--border); background: var(--surface-2); }
 .pt-dict textarea { width: 100%; margin-top: 8px; font: inherit; font-size: 14.5px; }
 .pt-dict-prev { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }

@@ -41,12 +41,12 @@
     plans: { db: 'plans', cols: { id: null, name: '', type: 'weekly', per_week: null, credits: null, duration_days: 30, price: 0 } },
     classTypes: { db: 'class_types', cols: { id: null, name: '', color: '#2F5D8A', coach: '', capacity: 20, duration: 60, description: '', hidden: false } },
     schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null } },
-    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '' } },
-    payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', created_at: NOW } },
+    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '', erasure_requested_at: null } },
+    payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', payer_name: '', created_at: NOW } },
     cashMoves: { db: 'cash_moves', cols: { id: null, date: null, concept: '', method: 'Efectivo', base: 0, iva: false, amount: 0, created_at: NOW } },
     workouts: { db: 'workouts', cols: { id: null, week_start: null, position: 1, title: '', rounds: null, work_secs: null, rest_secs: null, notes: '', exercises: [], created_at: NOW } },
     exercises: { db: 'exercises', cols: { id: null, name: '', created_at: NOW } },
-    ptClients: { db: 'pt_clients', cols: { id: null, member_id: null, name: '', phone: '', email: '', goal: '', days: '', notes: '', active: true, created_at: NOW } },
+    ptClients: { db: 'pt_clients', cols: { id: null, member_id: null, name: '', phone: '', email: '', goal: '', days: '', notes: '', active: true, health_consent_at: null, created_at: NOW } },
     importLogs: { db: 'import_logs', cols: { id: null, at: NOW, file: '', created: [], updated: [], group_adds: [] } },
     ptSessions: { db: 'pt_sessions', cols: { id: null, client_id: null, date: null, routine: '', notes: '', exercises: [], created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
@@ -57,7 +57,7 @@
     emails: { db: 'emails', cols: { id: null, user_id: null, to_email: '', subject: '', body: '', date: NOW, sent_at: null, error: null } },
   };
   const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments', 'cashMoves', 'exercises', 'workouts', 'ptClients', 'ptSessions', 'importLogs'];
-  const TS = new Set(['import_logs.at', 'cash_moves.created_at', 'workouts.created_at', 'exercises.created_at', 'pt_clients.created_at', 'pt_sessions.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
+  const TS = new Set(['import_logs.at', 'pt_clients.health_consent_at', 'members.erasure_requested_at', 'cash_moves.created_at', 'workouts.created_at', 'exercises.created_at', 'pt_clients.created_at', 'pt_sessions.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
   const toCamel = s => s === 'to_email' ? 'to' : s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
   const toJS = (t, row) => {
     const o = {};
@@ -254,6 +254,18 @@
     await reload();
     return error ? { ok: false, msg: error.message } : data;
   };
+  // Derechos RGPD del socio: pedir el borrado y descargar sus cobros (el servidor solo le da los suyos)
+  window.requestErasure = async function () {
+    const { data, error } = await sb.rpc('request_erasure');
+    await reload();
+    return error ? { ok: false, msg: 'No se pudo enviar: ' + error.message } : data;
+  };
+  window.myPayments = async function (userId) {
+    if (role === 'admin') return (db.payments || []).filter(p => p.userId === userId);
+    const { data, error } = await sb.from('payments').select('month, status, paid_at, method, total').eq('user_id', userId);
+    if (error) throw error;
+    return (data || []).map(p => ({ month: p.month, status: p.status, paidAt: p.paid_at, method: p.method, total: p.total }));
+  };
   // Borrar notificaciones: el cliente solo puede borrar las suyas (lo comprueba el servidor)
   window.deleteReadNotifications = async function () {
     if (role === 'admin') { window.saveDB(); return; }
@@ -359,7 +371,7 @@
             <button class="btn ghost sm" data-a="login-back">← Cambiar email</button>
             <button class="btn ghost sm" data-a="login-resend">Reenviar código</button>
           </div>`}
-        <p class="muted small" style="margin:16px 0 0;border-top:1px solid var(--border);padding-top:12px">Usamos tus datos solo para gestionar tus clases. <button class="legal-link" data-a="privacy">Privacidad</button></p>
+        <p class="muted small" style="margin:16px 0 0;border-top:1px solid var(--border);padding-top:12px">Responsable: ${esc(db?.settings?.centerName || 'Onlysport Center')}. Finalidad: gestionar tus clases y cuotas. Derechos: ver, corregir, borrar y llevarte tus datos. <button class="legal-link" data-a="privacy">Más información</button></p>
       </div></div>`;
   };
 

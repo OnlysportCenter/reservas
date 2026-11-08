@@ -84,7 +84,7 @@ function loadSheetJS() {
   if (window.XLSX) return Promise.resolve();
   return new Promise((res, rej) => {
     const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.src = 'js/vendor/xlsx.full.min.js';
     s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar el lector de Excel (¿sin internet?). Guarda el archivo como CSV y vuelve a intentarlo.'));
     document.head.appendChild(s);
   });
@@ -388,7 +388,8 @@ function purgeClients(ids) {
   db.bookings = db.bookings.filter(b => !set.has(b.userId));
   db.notifications = db.notifications.filter(n => !set.has(n.userId));
   db.emails = db.emails.filter(e => !set.has(e.userId));
-  if (db.payments) db.payments = db.payments.filter(p => !set.has(p.userId));
+  // los cobros NO se borran (hay que conservarlos años por contabilidad y Hacienda): se quedan con el nombre
+  (db.payments || []).forEach(p => { if (set.has(p.userId)) { p.payerName = p.payerName || getUser(p.userId)?.name || ''; p.userId = null; } });
   db.users = db.users.filter(u => !set.has(u.id));
 }
 function undoImportLog(logId) {
