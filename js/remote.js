@@ -12,7 +12,17 @@
   const cfg = window.RESERVAS_CONFIG || {};
   window.SERVER = !!(cfg.supabaseUrl && cfg.supabaseKey && window.supabase);
   if (!window.SERVER) {
-    if (cfg.supabaseUrl && !window.supabase) console.warn('No se pudo cargar Supabase (¿sin internet?). Modo prueba.');
+    // La app real (con config.js relleno) NUNCA cae en el modo prueba: si no carga la conexión, avisa y reintenta
+    if (cfg.supabaseUrl) {
+      console.warn('No se pudo cargar Supabase: no se usa el modo prueba.');
+      window.init = function () {
+        document.getElementById('app').innerHTML = `<div class="login"><div class="card" style="text-align:center">
+          <h2 style="margin-bottom:8px">No hemos podido cargar la app</h2>
+          <p class="muted">Comprueba tu conexión a internet y vuelve a intentarlo.</p>
+          <button class="btn primary block" data-a="reload-page">Reintentar</button></div></div>`;
+      };
+      window.render = window.init; window.renderLogin = window.init;
+    }
     return;
   }
 
@@ -30,7 +40,7 @@
     el.id = 'save-error';
     el.className = 'save-error';
     el.innerHTML = `<div><b>⚠️ No se han podido guardar los últimos cambios.</b><div class="small">Recarga la página: verás lo que de verdad está guardado. (${esc(e.message || e)})</div></div>
-      <button class="btn sm" onclick="location.reload()">Recargar</button>`;
+      <button class="btn sm" data-a="reload-page">Recargar</button>`;
     document.body.appendChild(el);
   }
 
@@ -41,7 +51,7 @@
     plans: { db: 'plans', cols: { id: null, name: '', type: 'weekly', per_week: null, credits: null, duration_days: 30, price: 0 } },
     classTypes: { db: 'class_types', cols: { id: null, name: '', color: '#2F5D8A', coach: '', capacity: 20, duration: 60, description: '', hidden: false } },
     schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null } },
-    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '' } },
+    users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '', invited_at: null } },
     payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', payer_name: '', created_at: NOW } },
     cashMoves: { db: 'cash_moves', cols: { id: null, date: null, concept: '', method: 'Efectivo', base: 0, iva: false, amount: 0, created_at: NOW } },
     workouts: { db: 'workouts', cols: { id: null, week_start: null, position: 1, title: '', rounds: null, work_secs: null, rest_secs: null, notes: '', exercises: [], created_at: NOW } },
@@ -51,13 +61,13 @@
     ptSessions: { db: 'pt_sessions', cols: { id: null, client_id: null, date: null, routine: '', notes: '', exercises: [], created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
     sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false } },
-    bookings: { db: 'bookings', cols: { id: null, session_id: null, user_id: null, status: 'booked', source: null, created_at: NOW, reminded: false, block_removed: false, group_removed: false } },
+    bookings: { db: 'bookings', cols: { id: null, session_id: null, user_id: null, status: 'booked', source: null, created_at: NOW, reminded: false, block_removed: false, group_removed: false, cancelled_from: null } },
     announcements: { db: 'announcements', cols: { id: null, title: '', body: '', date: NOW, pinned: false } },
     notifications: { db: 'notifications', cols: { id: null, user_id: null, text: '', type: 'info', date: NOW, read: false } },
     emails: { db: 'emails', cols: { id: null, user_id: null, to_email: '', subject: '', body: '', date: NOW, sent_at: null, error: null } },
   };
   const ORDER = ['plans', 'classTypes', 'schedule', 'users', 'sessions', 'bookings', 'announcements', 'notifications', 'emails', 'prospects', 'payments', 'cashMoves', 'exercises', 'workouts', 'ptClients', 'ptSessions', 'importLogs'];
-  const TS = new Set(['import_logs.at', 'pt_clients.health_consent_at',  'cash_moves.created_at', 'workouts.created_at', 'exercises.created_at', 'pt_clients.created_at', 'pt_sessions.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
+  const TS = new Set(['members.invited_at', 'import_logs.at', 'pt_clients.health_consent_at',  'cash_moves.created_at', 'workouts.created_at', 'exercises.created_at', 'pt_clients.created_at', 'pt_sessions.created_at','bookings.created_at', 'announcements.date', 'notifications.date', 'emails.date', 'emails.sent_at', 'members.payment_answered_at', 'prospects.created_at', 'payments.created_at']);
   const toCamel = s => s === 'to_email' ? 'to' : s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
   const toJS = (t, row) => {
     const o = {};

@@ -577,7 +577,9 @@ function toggleSilentAdd() {
 function viewAdminAgenda() {
   const list = sessionsOn(state.date);
   return `
-    <div class="page-title"><h1>Agenda</h1><button class="btn primary" data-a="extra-session">${icon('plus', 'width="18" height="18"')}Clase extra</button></div>
+    <div class="page-title"><h1>Agenda</h1><div class="row wrap">
+      <button class="btn" data-a="holiday" data-d="${state.date}">🎉 Día festivo</button>
+      <button class="btn primary" data-a="extra-session">${icon('plus', 'width="18" height="18"')}Clase extra</button></div></div>
     ${dayStrip(-7, db.settings.bookWindowDays + 7)}
     ${dayTitle(state.date)}
     <div class="stack">${list.length ? list.map(adminSessionCard).join('') : '<div class="card empty">No hay clases este día.</div>'}</div>`;
@@ -870,6 +872,7 @@ function viewAdminClientsList(tabs = '') {
     pay: ['💶 Cuota pendiente', c => c.paymentDue],
     blocked: ['Bloqueados', c => c.blocked],
     bademail: ['Email inválido', c => c.emailInvalid || !c.email],
+    noapp: ['📱 Sin entrar todavía', c => c.active && !c.authId && !!c.email],
     ph: ['🃏 Comodines', c => c.isPlaceholder],
   };
   const fk = state.clientFilter || 'all', f = filters[fk] || filters.all;
@@ -897,6 +900,7 @@ function viewAdminClientsList(tabs = '') {
         <button class="btn sm" data-a="bulk-paydue" ${state.sel.size ? '' : 'disabled'}>💶 Marcar cuota pendiente</button>
         <button class="btn sm ok" data-a="bulk-paid" ${state.sel.size ? '' : 'disabled'}>✅ Marcar como pagada</button>
         <button class="btn sm primary" data-a="bulk-group" ${state.sel.size ? '' : 'disabled'}>👥 Meter en grupo</button>
+        <button class="btn sm" data-a="bulk-invite" ${state.sel.size ? '' : 'disabled'}>✉️ Invitar a la app</button>
         <button class="btn sm danger" data-a="bulk-delete" ${state.sel.size ? '' : 'disabled'} style="margin-left:auto">🗑 Borrar ${state.sel.size || ''}</button></div>
     </div>` : ''}
     <div class="card list">${list.length ? list.map(c => {
@@ -943,6 +947,46 @@ function openPlaceholderForm(id) {
       <div class="field"><label>Nombre que verás en las clases</label><input name="name" placeholder="p. ej. Plaza del centro, Invitado, Prueba…" value="${esc(c?.name || '')}"></div>
       <div class="modal-actions"><button type="button" class="btn" data-a="close">Cancelar</button><button class="btn primary" type="submit">Guardar</button></div>
     </form>`);
+}
+
+// Día festivo: cancela de golpe todas las clases de un día (y se puede deshacer)
+function openHoliday(day) {
+  // también las clases del horario que aún no se han creado (fechas lejanas)
+  const ss = [...sessionsOn(day), ...projectedSessions(day).map(p => ({ ...p, id: 'p-' + p.templateId }))].sort((a, b) => a.time.localeCompare(b.time));
+  const active = ss.filter(s => !s.cancelled), off = ss.filter(s => s.cancelled);
+  const count = s => s.projected ? { b: s.members, w: 0 } : { b: bookedIn(s.id).length, w: waitlistOf(s.id).length };
+  const people = active.reduce((a, s) => a + count(s).b + count(s).w, 0);
+  openModal(`${modalHead('🎉 Día festivo')}
+    <div class="field"><label>Día</label><input type="date" value="${day}" data-change="holiday-day"></div>
+    <p style="margin:-4px 0 10px"><b>${fmtDateLong(day)}</b></p>
+    ${active.length ? `<div class="card list" style="margin-bottom:10px">${active.map(s => `<div class="list-item"><span class="swatch" style="--c:${sessionColor(s)}"></span>
+      <div class="grow"><b>${s.time}</b> ${esc(getClassType(s.classTypeId).name)}</div><span class="muted small">${count(s).b} ${s.projected ? 'del grupo fijo' : 'apuntados'}${count(s).w ? ` · ${count(s).w} en espera` : ''}</span></div>`).join('')}</div>
+      <p class="small">Se cancelan las <b>${active.length}</b> clases de ese día${people ? ` y se les devuelve la clase a las <b>${people}</b> personas apuntadas` : ''}. Si te equivocas, aquí mismo puedes deshacerlo y vuelven a quedar apuntadas.</p>
+      <div class="field"><label>Motivo</label><input id="hol-reason" value="Festivo"></div>
+      <div class="small">${notifyChecks(false, true)}</div>
+      <div class="modal-actions"><button class="btn" data-a="close">Volver</button><button class="btn danger" data-a="holiday-ok" data-d="${day}">Cancelar las ${active.length} clases</button></div>`
+    : `<div class="card empty">${off.length ? `Las ${off.length} clases de ese día ya están canceladas.` : 'Ese día no hay clases.'}</div>`}
+    ${off.length ? `<div class="row between wrap" style="margin-top:12px;gap:8px"><span class="muted small">${off.length} ${off.length === 1 ? 'clase cancelada' : 'clases canceladas'} ese día</span>
+      <button class="btn" data-a="holiday-undo" data-d="${day}">↩️ No era festivo: reactivarlas</button></div>` : ''}`);
+}
+document.addEventListener('change', e => { if (e.target.dataset?.change === 'holiday-day' && e.target.value) openHoliday(e.target.value); });
+
+// Invitar a la app por correo: se ve el correo antes de enviarlo
+function openInvite(ids) {
+  const us = ids.map(getUser).filter(u => u && u.role === 'client' && !u.isPlaceholder);
+  const noMail = us.filter(u => !u.email), inApp = us.filter(u => u.email && u.authId), done = us.filter(u => u.email && !u.authId && u.invitedAt), todo = us.filter(u => u.email && !u.authId && !u.invitedAt);
+  const sample = todo[0] || done[0];
+  openModal(`${modalHead('✉️ Invitar a la app')}
+    <div class="grid-stats" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:10px">
+      <div class="card stat"><div class="v">${todo.length}</div><div class="l">Se les envía</div></div>
+      <div class="card stat"><div class="v">${done.length}</div><div class="l">Ya invitados antes</div></div>
+      <div class="card stat"><div class="v">${inApp.length}</div><div class="l">Ya usan la app</div></div>
+      <div class="card stat"><div class="v">${noMail.length}</div><div class="l">Sin correo</div></div></div>
+    ${done.length ? `<label class="check"><input type="checkbox" id="inv-again"> Volver a enviarla también a los ${done.length} ya invitados</label>` : ''}
+    ${ids.length > 60 ? '<p class="small" style="color:var(--warn)">⚠️ Son muchos de golpe. Mejor por tandas de unos 50: así no se te atascan los correos ni los códigos de entrada del día.</p>' : ''}
+    ${sample ? `<div class="section-h">Así le llega${todo.length + done.length > 1 ? ' (ejemplo)' : ''}</div><div class="card invite-preview"><b>Asunto: Tu app de reservas de ${esc(db.settings.centerName || 'Onlysport Center')}</b><hr>${esc(inviteText(sample)).replace(/\n/g, '<br>')}</div>` : '<p class="muted">No hay nadie a quien enviarla (ya usan la app o no tienen correo).</p>'}
+    <div class="modal-actions"><button class="btn" data-a="close">Cancelar</button>
+      <button class="btn primary" data-a="invite-ok" data-ids='${esc(JSON.stringify(us.map(u => u.id)))}' ${sample ? '' : 'disabled'}>Enviar invitación</button></div>`, 'wide');
 }
 
 // Meter a varios clientes seleccionados en un grupo fijo: se elige la hora y los días (L-X-V 9:15…)
@@ -994,7 +1038,8 @@ function openClient(id) {
           <span class="pill ${ps.ok ? 'ok' : 'danger'}">${p ? esc(p.name) : 'Sin tarifa'}</span>
           ${c.paymentDue ? '<span class="pill warn">💶 Cuota pendiente</span>' : '<span class="pill ok">Cuota al día</span>'}
           ${c.blocked ? '<span class="pill danger">🔒 Bloqueado</span>' : ''}${!c.active ? '<span class="pill">Cuenta desactivada</span>' : ''}
-          ${groupsOf(c.id).length ? `<span class="pill">${groupsOf(c.id).length} grupo(s) fijo(s)</span>` : ''}</div></div>
+          ${groupsOf(c.id).length ? `<span class="pill">${groupsOf(c.id).length} grupo(s) fijo(s)</span>` : ''}
+          ${c.authId ? '<span class="pill ok">📱 Ya usa la app</span>' : c.invitedAt ? `<span class="pill warn">✉️ Invitado el ${fmtDateShort(String(c.invitedAt).slice(0, 10))}, aún no ha entrado</span>` : '<span class="pill">Aún no ha entrado en la app</span>'}</div></div>
       <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
     </div>
     ${c.blocked ? `<div class="card row between wrap" style="background:var(--danger-bg);border-color:transparent;margin-bottom:12px">
@@ -1006,6 +1051,7 @@ function openClient(id) {
         <button class="btn ok" data-a="pay-paid" data-id="${c.id}">✅ Marcar como pagada</button></div>` : ''}
     <div class="row wrap" style="margin-bottom:12px">
       <button class="btn primary" data-a="multi-add" data-id="${c.id}">${icon('plus', 'width="16" height="16"')}Apuntar a clases</button>
+      ${c.email && !c.authId ? `<button class="btn" data-a="invite-one" data-id="${c.id}">✉️ ${c.invitedAt ? 'Reenviar invitación' : 'Invitar a la app'}</button>` : ''}
       ${!c.paymentDue ? `<button class="btn" data-a="pay-due" data-id="${c.id}">💶 Cuota pendiente</button>` : ''}
       ${!c.blocked ? `<button class="btn danger" data-a="client-block" data-id="${c.id}">🔒 Bloquear (impago)</button>` : ''}
     </div>
@@ -1398,6 +1444,7 @@ const actions = {
   logout: () => logout(),
   nav: d => { state.view = d.v; if (d.v === 'c-book' || d.v === 'a-agenda') state.date = dateKey(new Date()); closeModal(); render(); window.scrollTo(0, 0); },
   'nav-more': () => openNavMore(),
+  'reload-page': () => location.reload(),
   'nav-go': d => actions.nav(d),
   day: d => { state.date = d.k; render(); },
   close: () => closeModal(),
@@ -1447,11 +1494,24 @@ const actions = {
 
   // Admin: sesiones
   'session-open': d => openSession(d.id),
-  'session-cancel': d => openModal(`${modalHead('Cancelar clase')}<p>Se avisará a todos los apuntados y se les devolverá la clase.</p>
-    <div class="field"><label>Motivo (opcional)</label><input id="cancel-reason" placeholder="p. ej. entrenador enfermo"></div>
+  'session-cancel': d => openModal(`${modalHead('Cancelar clase')}<p>Se les devuelve la clase a todos los apuntados. Si fue un error, luego puedes reactivarla y vuelven a quedar apuntados.</p>
+    <div class="field"><label>Motivo (opcional)</label><input id="cancel-reason" placeholder="p. ej. festivo, entrenador enfermo…"></div>
+    <div class="small">${notifyChecks(true, true)}</div>
     <div class="modal-actions"><button class="btn" data-a="session-open" data-id="${d.id}">Volver</button><button class="btn danger" data-a="session-cancel-ok" data-id="${d.id}">Cancelar clase</button></div>`),
-  'session-cancel-ok': d => { cancelSession(d.id, $('#cancel-reason')?.value.trim()); toast('Clase cancelada y clientes avisados', 'ok'); openSession(d.id); render(); },
-  'session-restore': d => { restoreSession(d.id); openSession(d.id); render(); },
+  'session-cancel-ok': d => { const nt = readNotify(); cancelSession(d.id, $('#cancel-reason')?.value.trim(), nt.email, nt.app); toast(nt.email || nt.app ? 'Clase cancelada y clientes avisados' : 'Clase cancelada (sin avisos)', 'ok'); openSession(d.id); render(); },
+  'session-restore': d => { restoreSession(d.id); toast('Clase reactivada: los apuntados vuelven a estarlo', 'ok'); openSession(d.id); render(); },
+  holiday: d => openHoliday(d.d || state.date),
+  'holiday-ok': d => {
+    projectedSessions(d.d).forEach(p => materializeSession(p.templateId, d.d));   // se crean ya para poder cancelarlas
+    const ids = sessionsOn(d.d).filter(s => !s.cancelled).map(s => s.id); const nt = readNotify(); const reason = ($('#hol-reason')?.value || '').trim() || 'Festivo';
+    ids.forEach(id => cancelSession(id, reason, nt.email, nt.app));
+    toast(`🎉 ${fmtDateShort(d.d)}: ${ids.length} ${ids.length === 1 ? 'clase cancelada' : 'clases canceladas'}`, 'ok'); closeModal(); render();
+  },
+  'holiday-undo': d => {
+    const ids = sessionsOn(d.d).filter(s => s.cancelled).map(s => s.id);
+    ids.forEach(id => restoreSession(id));
+    toast(`${ids.length} ${ids.length === 1 ? 'clase reactivada' : 'clases reactivadas'}`, 'ok'); closeModal(); render();
+  },
   'session-hide': d => { toggleSessionHidden(d.id); toast(getSession(d.id).hidden ? 'Clase oculta a los clientes' : 'Clase visible para los clientes'); openSession(d.id); render(); },
   attend: d => { const b = getBooking(d.id); setAttendance(d.id, d.s); openSession(b.sessionId); render(); },
   'admin-unbook': d => openRemoveConfirm(d.id),
@@ -1517,6 +1577,14 @@ const actions = {
       <div class="modal-actions"><button class="btn" data-a="close">Volver</button><button class="btn primary" data-a="bulk-paydue-ok">Marcar cuota pendiente</button></div>`),
   'bulk-paydue-ok': () => { const nt = readNotify(); state.sel.forEach(id => markPaymentDue(id, nt)); toast(`Aviso enviado a ${state.sel.size} cliente(s)`, 'ok'); state.sel.clear(); closeModal(); render(); },
   'bulk-group': () => openBulkGroup(),
+  'invite-one': d => openInvite([d.id]),
+  'bulk-invite': () => openInvite([...state.sel]),
+  'invite-ok': (d, el) => {
+    const ids = JSON.parse(el.dataset.ids || '[]'), again = !!$('#inv-again')?.checked;
+    let n = 0; ids.forEach(id => { const u = getUser(id); if (u && u.email && !u.authId && (again || !u.invitedAt)) { if (inviteUser(id)) n++; } });
+    saveDB(); closeModal(); state.sel?.clear?.();
+    toast(n ? `✉️ ${n} ${n === 1 ? 'invitación enviada' : 'invitaciones enviadas'}` : 'No había nadie a quien enviar', n ? 'ok' : 'err'); render();
+  },
   'bulk-group-ok': () => {
     const slots = [...document.querySelectorAll('input[name="bg-slot"]:checked')].map(x => x.value);
     if (!slots.length) return toast('Marca al menos un día', 'err');

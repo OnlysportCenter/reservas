@@ -427,6 +427,22 @@ function sendEmail(userId, subject, body) {
   if (!u || u.isPlaceholder || !u.email) return;   // sin correo (comodines)
   db.emails.push({ id: uid(), userId, to: u.email, subject, body, date: new Date().toISOString() });
 }
+// Invitación a la app por correo (desde el panel)
+const appUrl = () => (db.settings.appUrl || 'https://reservas.onlysportcenter.es').replace(/\/+$/, '');
+function inviteText(u) {
+  const name = db.settings.centerName || 'Onlysport Center';
+  return `Hola ${String(u.name || '').split(' ')[0]},\n\nYa puedes reservar tus clases de ${name} desde el móvil con nuestra app:\n\n${appUrl()}\n\n`
+    + `CÓMO ENTRAR\n1. Abre el enlace.\n2. Escribe este correo: ${u.email}\n3. Te llegará un código de 6 cifras: escríbelo y ya estás dentro. No hace falta contraseña y la app se acuerda de ti.\n\n`
+    + `CÓMO TENERLA COMO UNA APP\n· iPhone: ábrela con Safari, pulsa el botón Compartir (el cuadrado con la flecha) y «Añadir a pantalla de inicio».\n· Android: ábrela con Chrome, pulsa el menú ⋮ y «Instalar aplicación» (o «Añadir a pantalla de inicio»).\n\n`
+    + `Desde la app puedes ver tus clases, quitarte si vas a faltar, cambiarte de clase y apuntarte a la lista de espera.\n\n¡Nos vemos en el centro!\n${name}`;
+}
+function inviteUser(userId) {
+  const u = getUser(userId);
+  if (!u || u.isPlaceholder || !u.email || u.role !== 'client') return false;
+  sendEmail(userId, `Tu app de reservas de ${db.settings.centerName || 'Onlysport Center'}`, inviteText(u));
+  u.invitedAt = new Date().toISOString();
+  return true;
+}
 function generateReminders(userId) {
   const now = new Date();
   const limit = now.getTime() + db.settings.reminderHours * 3600000;
@@ -574,19 +590,34 @@ function promoteMemberWaitlists(userId) {
 }
 
 // ---------- Administración de sesiones ----------
-function cancelSession(sessionId, reason = '', email = true) {
+function cancelSession(sessionId, reason = '', email = true, app = true) {
   const s = getSession(sessionId);
   s.cancelled = true;
   db.bookings.filter(b => b.sessionId === sessionId && ['booked', 'waitlist'].includes(b.status)).forEach(b => {
     if (b.status === 'booked') refundCredit(getUser(b.userId));
+    b.cancelledFrom = b.status;   // para poder deshacerlo (p. ej. si se marcó festivo por error)
     b.status = 'cancelled';
     const txt = `❌ La clase ${classLabel(s)} ha sido cancelada${reason ? ': ' + reason : ''}. Se te ha devuelto la clase.`;
-    notify(b.userId, txt, 'warn');
+    if (app) notify(b.userId, txt, 'warn');
     if (email) sendEmail(b.userId, 'Clase cancelada', `Hola,\n\n${txt}\n\n${db.settings.centerName}`);
   });
   saveDB();
 }
-function restoreSession(sessionId) { getSession(sessionId).cancelled = false; saveDB(); }
+// Reactivar una clase cancelada: los que estaban apuntados vuelven a estarlo
+function restoreSession(sessionId, { app = true } = {}) {
+  const s = getSession(sessionId);
+  s.cancelled = false;
+  db.bookings.filter(b => b.sessionId === sessionId && b.status === 'cancelled' && b.cancelledFrom).forEach(b => {
+    const u = getUser(b.userId); if (!u) return;
+    if (b.cancelledFrom === 'booked') spendCredit(u);
+    b.status = b.cancelledFrom; b.cancelledFrom = null;
+    if (app) notify(b.userId, `✅ Al final la clase ${classLabel(s)} sí se hace: sigues apuntad@.`, 'success');
+  });
+  // y los del grupo fijo que aún no tenían reserva (p. ej. festivo marcado con meses de antelación)
+  const t = s.templateId && getSlot(s.templateId);
+  if (t) t.members.forEach(m => { if (getUser(m)) groupBook(m, s); });
+  saveDB();
+}
 function toggleSessionHidden(sessionId) { const s = getSession(sessionId); s.hidden = !s.hidden; saveDB(); }
 // Asistencia automática: una reserva de una clase ya terminada cuenta como «asistió»
 // salvo que el centro marque «no vino».

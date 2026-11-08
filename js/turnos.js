@@ -152,8 +152,8 @@ function printTurns() {
     <h1>Turnos · ${esc(db.settings.centerName)}</h1><p>${fmtDateLong(dateKey(new Date()))}</p><div class="g">
     ${turns.map(t => `<div class="t"><h2>TURNO ${t.time.replace(/^0/, '')} · ${DAYS_TXT(t.days.length)} (${t.days.map(x => DAY_LETTER[x]).join('-')})</h2>
       <div class="s">${t.members.length} socios · ${Math.max(0, t.free)} huecos</div><ol>${t.members.map(m => `<li>${esc(m.name)}</li>`).join('')}</ol></div>`).join('')}
-    </div><script>window.onload=()=>window.print()<\/script></body></html>`);
-  w.document.close();
+    </div></body></html>`);
+  w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 400);
 }
 
 Object.assign(actions, {

@@ -198,8 +198,8 @@ function printWeek() {
     ${list.map(w => `<div class="w"><h2>${w.position}. ${esc(w.title || 'Entrenamiento ' + w.position)}</h2>
       <div class="m">${[w.rounds ? `${w.rounds} rondas` : '', w.workSecs ? `${fmtSecs(w.workSecs)} trabajo` : '', w.restSecs != null ? `${fmtSecs(w.restSecs)} descanso` : ''].filter(Boolean).join(' · ')}</div>
       <ol>${(w.exercises || []).map(e => `<li>${esc(e.name)}${e.detail ? ' — ' + esc(e.detail) : ''}</li>`).join('')}</ol>${w.notes ? `<div class="n">📝 ${esc(w.notes)}</div>` : ''}</div>`).join('') || '<p>No hay entrenamientos esta semana.</p>'}
-    </div><script>window.onload=()=>window.print()<\/script></body></html>`);
-  win.document.close();
+    </div></body></html>`);
+  win.document.close(); setTimeout(() => { try { win.focus(); win.print(); } catch (e) {} }, 400);
 }
 
 document.addEventListener('input', e => {
