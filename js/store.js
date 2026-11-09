@@ -249,11 +249,42 @@ function addGroupMember(slotId, userId, { email = true, app = true } = {}) {
   if (db.settings.silentAdminAdd) email = app = false;   // «No avisar cuando apunto yo»
   const t = getSlot(slotId), u = getUser(userId);
   if (!t.members.includes(userId)) t.members.push(userId);
+  if (t.private && !(t.allowed || []).includes(userId)) t.allowed = [...(t.allowed || []), userId];   // en un turno privado, quien es fijo también tiene permiso
   let n = 0;
   db.sessions.filter(s => s.templateId === slotId).forEach(s => { if (groupBook(userId, s)) n++; });
   const txt = `El centro te ha apuntado al grupo fijo de ${slotLabel(t)}. Tendrás plaza reservada cada semana; si algún día no puedes venir, quítate desde la app.`;
   if (app) notify(userId, '📅 ' + txt, 'success');
   if (email) sendEmail(userId, 'Te hemos apuntado a un grupo', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  saveDB();
+  return n;
+}
+// Turno privado: dar o quitar permiso a una persona (ve el turno y se apunta ella misma)
+function allowInSlot(slotId, userId, { email = true, app = true, label = null } = {}) {
+  if (db.settings.silentAdminAdd) email = app = false;
+  const t = getSlot(slotId), u = getUser(userId);
+  if (!t || !u) return false;
+  t.allowed = t.allowed || [];
+  if (t.allowed.includes(userId)) return false;
+  t.allowed.push(userId);
+  const txt = `Tienes acceso al turno especial de ${label || slotLabel(t)}. Lo verás en «Reservar» y podrás apuntarte o quitarte cuando quieras.`;
+  if (app) notify(userId, '🔒 ' + txt, 'success');
+  if (email) sendEmail(userId, 'Tienes acceso a un turno especial', `Hola ${u.name.split(' ')[0]},\n\n${txt}\n\n${db.settings.centerName}`);
+  saveDB();
+  return true;
+}
+// Quitar el permiso: sale del grupo fijo y de sus próximas reservas en ese turno
+function disallowInSlot(slotId, userId) {
+  const t = getSlot(slotId); if (!t) return 0;
+  t.allowed = (t.allowed || []).filter(x => x !== userId);
+  t.members = (t.members || []).filter(x => x !== userId);
+  let n = 0; const touched = new Set();
+  db.bookings.filter(b => b.userId === userId && ['booked', 'waitlist'].includes(b.status)).forEach(b => {
+    const s = getSession(b.sessionId);
+    if (!s || s.templateId !== slotId || sessionStart(s) <= new Date()) return;
+    if (b.status === 'booked') refundCredit(getUser(userId));
+    b.status = 'cancelled'; b.groupRemoved = true; n++; touched.add(s.id);
+  });
+  touched.forEach(sid => promoteWaitlist(sid));
   saveDB();
   return n;
 }
@@ -304,6 +335,11 @@ function sessionVisibleUntil(s) {
   return vd !== null ? addDays(startOfDay(new Date()), vd + 1) : visibleUntil();
 }
 function isVisibleToClients(s) { return !isHidden(s) && sessionStart(s) < sessionVisibleUntil(s); }
+// Turnos privados: solo los ven y reservan las personas con permiso (y las fijas del grupo)
+function slotOf(s) { return s && s.templateId ? db.schedule.find(x => x.id === s.templateId) : null; }
+function isPrivate(s) { return !!slotOf(s)?.private; }
+function slotAllows(t, userId) { return !t || !t.private || (t.allowed || []).includes(userId) || (t.members || []).includes(userId); }
+function canSeeSession(userId, s) { const u = getUser(userId); return (u && u.role === 'admin') || slotAllows(slotOf(s), userId); }
 
 // ---------- Consultas ----------
 const getUser = id => db.users.find(u => u.id === id);
@@ -472,6 +508,7 @@ function book(userId, sessionId) {
   const ps = planStatus(u);
   if (ps.blocked) return ps;
   if (userBookingIn(userId, sessionId)) return { ok: false, msg: 'Ya estás apuntad@ a esta clase.' };
+  if (!canSeeSession(userId, s)) return { ok: false, msg: 'Esta clase es solo para un grupo concreto.' };
   if (s.cancelled) return { ok: false, msg: 'Esta clase ha sido cancelada.' };
   if (!isVisibleToClients(s)) return { ok: false, msg: 'Esta clase todavía no está disponible.' };
   if (sessionStart(s) <= new Date()) return { ok: false, msg: 'Esta clase ya ha empezado.' };
@@ -504,6 +541,7 @@ function adminAddToSessions(userId, sessionIds, { whenFull = 'waitlist', mode = 
   const res = { booked: [], waitlist: [], skipped: [] };
   sessionIds.map(getSession).filter(Boolean).sort((a, b) => sessionStart(a) - sessionStart(b)).forEach(s => {
     if (userBookingIn(userId, s.id)) return res.skipped.push(s);
+    const tp = slotOf(s); if (tp && tp.private && !slotAllows(tp, userId)) tp.allowed = [...(tp.allowed || []), userId];   // si le apunto yo a un turno privado, le doy permiso
     const full = freeSpots(s) <= 0;
     if (mode === 'waitlist' || (full && whenFull === 'waitlist')) {
       db.bookings.push({ id: uid(), sessionId: s.id, userId, status: 'waitlist', createdAt: new Date().toISOString(), reminded: false });
@@ -629,9 +667,9 @@ function setAttendance(bookingId, status) { getBooking(bookingId).status = statu
 function updateSessionCapacity(sessionId, cap) { getSession(sessionId).capacity = cap; promoteWaitlist(sessionId); saveDB(); }
 
 // ---------- Horario semanal ----------
-function addScheduleSlot(weekday, time, classTypeId, capacity = null, { startDate = null, endDate = null, visibleDays = null, color = null } = {}) {
+function addScheduleSlot(weekday, time, classTypeId, capacity = null, { startDate = null, endDate = null, visibleDays = null, color = null, private: priv = false, allowed = [] } = {}) {
   const id = uid();
-  db.schedule.push({ id, weekday, time, classTypeId, members: [], capacity, startDate, endDate, visibleDays, color });
+  db.schedule.push({ id, weekday, time, classTypeId, members: [], capacity, startDate, endDate, visibleDays, color, private: !!priv, allowed: [...allowed] });
   ensureSessions(); saveDB();
   return id;
 }
@@ -890,4 +928,10 @@ function fmtAgo(iso) {
   if (diff < 1440) return `hace ${Math.floor(diff / 60)} h`;
   const d = new Date(iso);
   return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+// «Lunes y miércoles 20:30 · Funcional» para avisar de un turno de varios días
+function slotsLabel(ts) {
+  const ds = [...ts].sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7)).map(x => DOW_LONG[x.weekday].toLowerCase());
+  const days = ds.length > 1 ? ds.slice(0, -1).join(', ') + ' y ' + ds.at(-1) : ds[0];
+  return `${days} ${ts[0].time} · ${getClassType(ts[0].classTypeId)?.name}`;
 }

@@ -256,12 +256,16 @@ function paymentBanner(u) {
         <button class="btn sm" data-a="pay-answer" data-v="leave">Me doy de baja</button></div></div>`;
 }
 
+// Entrenamiento de la clase y etiqueta de turno privado (lo ve solo quien puede ver la clase)
+const pvtTag = s => isPrivate(s) ? '<span class="pvt-tag" title="Solo para un grupo concreto">🔒 Grupo especial</span>' : '';
+const workoutBlock = s => (s.workout || '').trim() && !s.cancelled
+  ? `<details class="session-workout"><summary>📋 Entrenamiento de la clase</summary><div class="wk-text">${esc(s.workout.trim())}</div></details>` : '';
 function viewClientBook() {
   const u = me();
   const ahead = clientDaysAhead();
   if (state.date > dateKey(addDays(new Date(), ahead)) || state.date < dateKey(new Date())) state.date = dateKey(new Date());
   fixClientDate(ahead);
-  const list = sessionsOn(state.date).filter(isVisibleToClients);
+  const list = sessionsOn(state.date).filter(s => isVisibleToClients(s) && canSeeSession(u.id, s));
   const ps = planStatus(u);
   const now = new Date();
   return `
@@ -298,8 +302,9 @@ function viewClientBook() {
         else act = `<button class="btn btn-big primary" data-a="book" data-id="${s.id}">Reservar</button>`;
         return `<div class="card session client-session ${s.cancelled ? 'cancelled' : ''} ${b?.status === 'booked' && !s.cancelled ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
-          <div class="info"><div class="name">${esc(ct.name)}</div>${s.cancelled ? '' : spotsInfo(s)}</div>
+          <div class="info"><div class="name">${esc(ct.name)} ${pvtTag(s)}</div>${s.cancelled ? '' : spotsInfo(s)}</div>
           ${extra ? `<div class="session-extra">${extra}</div>` : ''}
+          ${workoutBlock(s)}
           ${act ? `<div class="act">${act}</div>` : ''}</div>`;
       }).join('') : `<div class="empty">${icon('cal')}<div>No hay clases este día.</div></div>`}
     </div>
@@ -324,8 +329,9 @@ function viewClientMine() {
         const canCancel = state.mineTab === 'next' && sessionStart(s) > now;
         return `<div class="card session client-session ${b.status === 'booked' || b.status === 'attended' ? 'is-booked' : ''}" style="--c:${sessionColor(s)}">
           <div class="time"><div class="t">${s.time}</div><div class="d">${fmtDateShort(s.date)}</div></div>
-          <div class="info"><div class="name">${esc(ct.name)}</div><div class="meta">${s.duration} min</div>
+          <div class="info"><div class="name">${esc(ct.name)} ${pvtTag(s)}</div><div class="meta">${s.duration} min</div>
             ${canCancel && b.status === 'booked' && isLateCancel(s) ? `<div class="small" style="color:var(--warn);margin-top:4px">Fuera de plazo de cancelación gratuita</div>` : ''}</div>
+          ${state.mineTab === 'next' ? workoutBlock(s) : ''}
           <div class="act">${statusPill(b)}${canCancel ? `<button class="btn btn-big ${b.status === 'booked' ? 'danger' : ''}" data-a="cancel-booking" data-id="${b.id}">${b.status === 'booked' ? 'Cancelar' : 'Salir'}</button>` : ''}</div></div>`;
       }).join('') : `<div class="empty">${icon('check')}<div>${state.mineTab === 'next' ? 'No tienes clases reservadas.' : 'Aún no hay historial.'}</div>
         ${state.mineTab === 'next' ? '<button class="btn primary" style="margin-top:12px" data-a="nav" data-v="c-book">Reservar ahora</button>' : ''}</div>`}
@@ -551,7 +557,7 @@ function adminSessionCard(s) {
   const published = sessionStart(s) < visibleUntil();
   return `<div class="card session clickable ${s.cancelled ? 'cancelled' : ''} ${isHidden(s) ? 'is-hidden' : ''}" style="--c:${sessionColor(s)}" data-a="session-open" data-id="${s.id}">
     <div class="time"><div class="t">${s.time}</div><div class="d">${s.duration} min</div></div>
-    <div class="info"><div class="name">${esc(ct.name)}</div><div class="meta">${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div>${capBar(s)}</div>
+    <div class="info"><div class="name">${esc(ct.name)}${isPrivate(s) ? ' 🔒' : ''}${s.workout ? ' 📋' : ''}</div><div class="meta">${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div>${capBar(s)}</div>
     <div class="act">${s.cancelled ? '<span class="pill danger">Cancelada</span>' : ''}${isHidden(s) ? '<span class="pill">🙈 Oculta</span>' : ''}
       ${!s.cancelled && !isHidden(s) && !published ? '<span class="pill warn">Sin publicar</span>' : ''}${!s.cancelled && freeSpots(s) <= 0 ? '<span class="pill danger">Completa</span>' : ''}</div></div>`;
 }
@@ -618,7 +624,7 @@ function openSession(id) {
   openModal(`
     <div class="sx-head" style="--c:${sessionColor(s)}">
       <div class="sx-time"><b>${s.time}</b><span>${s.duration} min</span></div>
-      <div class="grow"><h2>${esc(ct.name)}</h2><div class="sx-sub">${fmtDateLong(s.date)} · ${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div><div style="margin-top:6px">${statusTag}${s.hidden ? '<span class="sx-tag">🙈 Oculta</span>' : ''}</div></div>
+      <div class="grow"><h2>${esc(ct.name)}</h2><div class="sx-sub">${fmtDateLong(s.date)} · ${esc(s.coach)}${s.templateId ? '' : ' · clase extra'}</div><div style="margin-top:6px">${statusTag}${isPrivate(s) ? '<span class="sx-tag">🔒 Solo su grupo</span>' : ''}${s.hidden ? '<span class="sx-tag">🙈 Oculta</span>' : ''}</div></div>
       <button class="btn sm refresh-btn" data-a="refresh-modal" data-k="session" data-id="${s.id}" title="Ver los últimos cambios (si alguien se ha apuntado o quitado)">${icon('refresh', 'width="17" height="17"')} Actualizar</button>
       <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
     </div>
@@ -641,10 +647,18 @@ function openSession(id) {
             <div class="sx-meta"><span class="muted small">${can ? 'Entrará en cuanto haya plaza' : 'Espera a quitarse de otra clase'} · desde ${fmtAgo(b.createdAt)}</span></div></div>
             <button class="btn sm quitar" data-a="admin-unbook" data-id="${b.id}">${icon('x', 'width="15" height="15"')} Quitar</button></div>`;
         }).join('')}</div>` : ''}
+        <div class="section-h">📋 Entrenamiento de la clase</div>
+        <div class="card">
+          <textarea id="sess-workout" class="workout-edit" maxlength="4000" placeholder="Escribe aquí el entrenamiento (ejercicios, rondas, tiempos…). Lo verán en su app ${isPrivate(s) ? 'solo los socios de este grupo' : 'los socios que vean esta clase'}.">${esc(s.workout || '')}</textarea>
+          ${s.templateId ? `<label class="check small" style="margin-top:6px"><input type="checkbox" id="wk-next"> Poner el mismo en las próximas clases de este turno</label>` : ''}
+          ${db.settings.silentAdminAdd ? '' : '<label class="check small" style="margin-top:4px"><input type="checkbox" id="wk-notify"> Avisar en la app a los apuntados</label>'}
+          <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm primary" data-a="session-workout" data-id="${s.id}">Guardar entrenamiento</button>
+            ${s.workout ? `<button class="btn sm ghost" data-a="session-workout" data-id="${s.id}" data-clear="1">Quitar</button>` : ''}</div>
+        </div>
       </div>
       <div class="sx-side">
         ${!s.cancelled && !past ? `<div class="card">
-          <b>Apuntar a un cliente</b>
+          <b>Apuntar a un cliente</b>${isPrivate(s) ? '<div class="muted small" style="margin-top:2px">🔒 Turno privado: si apuntas a alguien sin permiso, se le da permiso.</div>' : ''}
           <div class="cpick" data-cpick='${esc(JSON.stringify(free.filter(c => c.active !== false).sort((a, b) => (a.isPlaceholder ? 1 : 0) - (b.isPlaceholder ? 1 : 0) || a.name.localeCompare(b.name)).map(c => ({ id: c.id, n: c.name, s: norm2(c.name + ' ' + (c.phone || '') + ' ' + (c.email || '')), b: !!c.blocked, p: !!c.isPlaceholder, pl: getPlan(c.planId)?.name || '' }))))}'>
             <input type="hidden" id="add-client-sel" value="">
             <input class="search cpick-q" style="margin:10px 0 0" placeholder="🔍 Escribe el nombre del cliente…" autocomplete="off" data-cpick-q>
@@ -718,7 +732,7 @@ function openSlot(slotId) {
   openModal(`
     <div class="sx-head" style="--c:${slotColor(t)}">
       <div class="sx-time"><b>${t.time}</b><span>${DOW[t.weekday]}</span></div>
-      <div class="grow"><h2>${esc(ct.name)} · grupo fijo</h2><div class="sx-sub">Todos los ${DOW_LONG[t.weekday].toLowerCase()} a las ${t.time} · ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · los socios lo ven ${t.visibleDays} días antes` : ''}</div></div>
+      <div class="grow"><h2>${esc(ct.name)} · ${t.private ? '🔒 turno privado' : 'grupo fijo'}</h2><div class="sx-sub">Todos los ${DOW_LONG[t.weekday].toLowerCase()} a las ${t.time} · ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · los socios lo ven ${t.visibleDays} días antes` : ''}</div></div>
       <button class="btn sm refresh-btn" data-a="refresh-modal" data-k="slot" data-id="${t.id}" title="Ver los últimos cambios">${icon('refresh', 'width="17" height="17"')} Actualizar</button>
       <button class="btn ghost sm" data-a="close" aria-label="Cerrar">${icon('x', 'width="20" height="20"')}</button>
     </div>
@@ -750,6 +764,7 @@ function openSlot(slotId) {
         <p class="muted small">Se les reservan ya las próximas clases de este horario y, a partir de ahí, todas las semanas.</p>
       </div>
       <div class="sx-side">
+        ${slotPrivacyCard(t, sameTime)}
         <div class="card">
           <b>Próximas clases</b>
           <div class="list" style="margin-top:6px">${upcoming.length ? upcoming.map(s => { const n = bookedIn(s.id).length, w = waitlistOf(s.id).length; return `<div class="list-item clickable" data-a="session-open" data-id="${s.id}" style="padding:8px 0">
@@ -780,6 +795,29 @@ function openSlot(slotId) {
       </div>
     </div>`, 'wide');
 }
+// Turno privado: activarlo y elegir quién lo ve y lo puede reservar
+function slotPrivacyCard(t, sameTime) {
+  const allowed = [...new Set([...(t.allowed || []), ...t.members])].map(getUser).filter(Boolean).sort((a, b) => a.name.localeCompare(b.name));
+  const others = realClients().filter(c => c.active && !allowed.some(a => a.id === c.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const sibs = db.schedule.filter(x => x.id !== t.id && x.time === t.time && x.classTypeId === t.classTypeId).sort((a, b) => ((a.weekday + 6) % 7) - ((b.weekday + 6) % 7));
+  const allDays = sibs.length ? `<div class="small" style="margin:6px 0 4px">Aplicar también a otros días de las ${t.time}:</div><div class="row wrap" style="gap:6px;margin-bottom:6px">${sibs.map(x => `<label class="check small"><input type="checkbox" name="pvt-day" value="${x.id}" ${t.private && x.private ? 'checked' : ''}> ${DOW_LONG[x.weekday]}${x.private ? ' 🔒' : ''}</label>`).join('')}</div>` : '';
+  if (!t.private) return `<div class="card pvt-card"><b>🔒 Turno privado</b>
+    <div class="muted small" style="margin:2px 0 8px">Ahora lo ve todo el mundo. Si lo haces privado, solo lo verán y reservarán los socios a los que des permiso (los del grupo fijo lo tienen ya).</div>
+    ${allDays}<button class="btn sm block" data-a="slot-private" data-id="${t.id}" data-v="1">🔒 Hacer privado</button></div>`;
+  return `<div class="card pvt-card" style="border-color:var(--primary)"><b>🔒 Turno privado</b>
+    <div class="muted small" style="margin:2px 0 4px">Solo lo ven y reservan estas ${allowed.length} persona(s). Los demás no saben que existe.</div>
+    <div class="pvt-list">${allowed.map(u => `<span class="pvt-chip">${esc(u.name)}${t.members.includes(u.id) ? ' <span class="muted small">· fijo</span>' : ''}<button type="button" data-a="pvt-disallow" data-id="${t.id}" data-u="${u.id}" title="Quitar permiso" aria-label="Quitar permiso a ${esc(u.name)}">×</button></span>`).join('') || '<span class="muted small">Nadie todavía.</span>'}</div>
+    <input class="search" placeholder="Buscar socio para darle permiso…" data-filter="#pvt-add-list .multi-item" style="margin:0 0 6px">
+    <div class="multi-list" id="pvt-add-list" style="max-height:24vh">${others.map(c => `<label class="multi-item" data-search="${esc(norm2(c.name + ' ' + (c.email || '')))}"><input type="checkbox" name="padd" value="${c.id}"><span class="grow ellipsis">${esc(c.name)}</span></label>`).join('') || '<div class="empty">No quedan socios.</div>'}</div>
+    ${allDays}
+    ${db.settings.silentAdminAdd ? '' : '<label class="check small" style="margin-top:6px"><input type="checkbox" id="pvt-notify" checked> Avisarles en la app de que tienen acceso</label>'}
+    <button class="btn sm primary block" style="margin-top:6px" data-a="pvt-allow" data-id="${t.id}">Dar permiso a los marcados</button>
+    <p class="muted small" style="margin:6px 0">Con permiso se apuntan y se quitan ellos. Si quieres que tengan plaza fija cada semana, añádelos además al grupo.</p>
+    <button class="btn sm ghost block" data-a="slot-private" data-id="${t.id}" data-v="0">🔓 Hacerlo público (que lo vea todo el mundo)</button></div>`;
+}
+// el turno y, si se marca, los demás días a la misma hora y del mismo tipo
+const pvtTargets = t => [t, ...[...document.querySelectorAll('input[name="pvt-day"]:checked')].map(x => getSlot(x.value)).filter(Boolean)];
+
 function openGroupRemove(slotId, userId) {
   const t = getSlot(slotId), u = getUser(userId);
   openModal(`${modalHead('Quitar del grupo')}
@@ -1147,7 +1185,7 @@ function viewAdminSchedule() {
         <button class="btn" data-a="season-all">📆 Temporada de todos los turnos</button>
         <button class="btn primary" data-a="slot-add">${icon('plus', 'width="18" height="18"')}Añadir horario</button></div></div>
       <div class="week-grid" style="--cols:${order.length}">${order.map(w => `<div class="week-col"><h4>${DOW_LONG[w]}</h4>
-        ${db.schedule.filter(t => t.weekday === w).sort((a, b) => a.time.localeCompare(b.time)).map(t => { const ct = getClassType(t.classTypeId); return ct ? `<div class="slot clickable ${ct.hidden ? 'is-hidden' : ''}" style="--c:${slotColor(t)}" data-a="slot-open" data-id="${t.id}" title="Ver grupo fijo"><div><b>${t.time}</b> ${esc(ct.name)}${ct.hidden ? ' 🙈' : ''}
+        ${db.schedule.filter(t => t.weekday === w).sort((a, b) => a.time.localeCompare(b.time)).map(t => { const ct = getClassType(t.classTypeId); return ct ? `<div class="slot clickable ${ct.hidden ? 'is-hidden' : ''}" style="--c:${slotColor(t)}" data-a="slot-open" data-id="${t.id}" title="Ver grupo fijo"><div><b>${t.time}</b> ${esc(ct.name)}${t.private ? ' 🔒' : ''}${ct.hidden ? ' 🙈' : ''}
           <div class="slot-members ${(t.members || []).length > slotCapacity(t) ? 'over' : ''}">👥 ${(t.members || []).length}/${slotCapacity(t)}${t.capacity ? ' plazas' : ''}</div>
           ${t.startDate || t.endDate || (t.visibleDays != null && t.visibleDays !== '') ? `<div class="slot-members">📆 ${seasonText(t)}${t.visibleDays != null && t.visibleDays !== '' ? ` · 👁 ${t.visibleDays} d` : ''}</div>` : ''}</div><button class="x" data-a="slot-del" data-id="${t.id}" title="Quitar">×</button></div>` : ''; }).join('') || '<div class="muted small">—</div>'}
       </div>`).join('')}</div>` : `
@@ -1207,7 +1245,7 @@ function viewSeasonCalendar() {
           const past = sessionStart(s) <= new Date();
           return `<div class="slot clickable ${s.cancelled ? 'cancelled' : ''} ${isHidden(s) ? 'is-hidden' : ''}" style="--c:${sessionColor(s)}"
               data-a="cal-open" ${s.projected ? `data-slot="${s.templateId}" data-k="${k}"` : `data-id="${s.id}"`} title="${s.projected ? 'Clase prevista: se crea al abrirla' : ''}">
-            <div><b>${s.time}</b> ${esc(ct.name)}
+            <div><b>${s.time}</b> ${esc(ct.name)}${isPrivate(s) ? ' 🔒' : ''}
               <div class="slot-members ${n > s.capacity ? 'over' : ''}">${s.cancelled ? '❌ Cancelada' : `👥 ${n}/${s.capacity}${s.projected ? ' previstos' : ''}`} ${past ? '' : vis ? '· 👁' : '· 🔒'}</div></div></div>`;
         }).join('') || '<div class="muted small">—</div>'}</div>`;
     }).join('')}</div>
@@ -1260,9 +1298,17 @@ function openTurnForm() {
           </div>
           <div class="field"><label>Días que lo ven los socios antes</label><input name="visibleDays" type="number" min="0" max="120" placeholder="Lo general: ${db.settings.bookWindowDays} días"></div>
           <p class="muted small" style="margin-top:-4px">Se repite todas las semanas de esos meses. Deja «Hasta» vacío si no tiene fin. Todo se puede cambiar luego.</p>
+          <div class="card pvt-card" style="margin-top:10px">
+            <label class="check"><input type="checkbox" name="private" data-turn-pvt> <b>🔒 Turno privado</b></label>
+            <p class="muted small" style="margin:4px 0 0">Solo lo ven y lo reservan los socios que elijas a la derecha. Los demás ni saben que existe. Ideal para un grupo especial (p. ej. entrenamiento híbrido).</p>
+            <div id="pvt-opts" hidden style="margin-top:8px">
+              <label class="check small"><input type="checkbox" name="autobook" checked> Reservarles la plaza cada semana (grupo fijo)</label>
+              <p class="muted small" style="margin:2px 0 0">Si lo quitas, solo tienen permiso: se apuntan y se quitan ellos desde la app.</p>
+            </div>
+          </div>
         </div>
         <div>
-          <div class="section-h row between" style="margin-top:0"><span>Socios del turno</span><span id="turn-count">0 elegidos</span></div>
+          <div class="section-h row between" style="margin-top:0"><span id="turn-people-h">Socios del turno</span><span id="turn-count">0 elegidos</span></div>
           <input class="search" placeholder="Buscar socio…" data-filter="#turn-people .multi-item" style="margin-bottom:6px">
           <label class="check small" style="margin-bottom:6px"><input type="checkbox" data-filter-nogroup="#turn-people .multi-item"> Mostrar solo los que no tienen ningún grupo</label>
           <div class="multi-list" id="turn-people" style="max-height:46vh">${people.map(c => {
@@ -1284,7 +1330,10 @@ function turnFormUpdate() {
   const n = f.querySelectorAll('input[name="gnew"]:checked').length, cap = Number(f.capacity.value) || 0;
   const days = f.querySelectorAll('input[name="wd"]:checked').length;
   const cnt = $('#turn-count'); if (cnt) cnt.textContent = `${n} elegido${n === 1 ? '' : 's'}${cap ? ` · ${cap} plazas` : ''}`;
-  const w = $('#turn-warn'); if (w) w.innerHTML = n > cap && cap ? `<span style="color:var(--danger)">⚠️ Has elegido ${n} y el turno tiene ${cap} plazas.</span>` : !days ? '<span class="muted">Marca los días del turno.</span>' : '';
+  const pvt = f.querySelector('[data-turn-pvt]')?.checked, auto = !pvt || f.autobook?.checked;
+  const po = $('#pvt-opts'); if (po) po.hidden = !pvt;
+  const ph = $('#turn-people-h'); if (ph) ph.textContent = pvt ? '🔒 Socios con permiso' : 'Socios del turno';
+  const w = $('#turn-warn'); if (w) w.innerHTML = pvt && !n ? '<span class="muted">Elige quién puede ver y reservar este turno.</span>' : n > cap && cap && auto ?`<span style="color:var(--danger)">⚠️ Has elegido ${n} y el turno tiene ${cap} plazas.</span>` : !days ? '<span class="muted">Marca los días del turno.</span>' : '';
 }
 document.addEventListener('change', e => { if (e.target.closest?.('.turn-form')) turnFormUpdate(); });
 document.addEventListener('input', e => { if (e.target.matches?.('[data-turn-cap]')) turnFormUpdate(); });
@@ -1682,6 +1731,46 @@ const actions = {
     setSlotCapacity(d.id, v === ct.capacity ? null : v);
     toast(`Turno con ${v} plazas`, 'ok'); openSlot(d.id); render();
   },
+  'slot-private': d => {
+    const t = getSlot(d.id); if (!t) return;
+    const on = d.v === '1', ts = pvtTargets(t);
+    if (!on) return confirmModal('Hacer público el turno', `Las clases de ${ts.map(x => DOW[x.weekday]).join(', ')} a las ${t.time} las verá y podrá reservar cualquier socio.`, `data-a="slot-private-ok" data-id="${t.id}" data-ids="${ts.map(x => x.id).join(',')}"`, 'Hacer público', false);
+    ts.forEach(x => { x.private = true; x.allowed = [...new Set([...(x.allowed || []), ...x.members])]; });
+    saveDB(); toast('🔒 Turno privado: ahora elige quién puede verlo', 'ok'); openSlot(d.id); render();
+  },
+  'slot-private-ok': d => {
+    const t = getSlot(d.id); if (!t) return;
+    d.ids.split(',').map(getSlot).filter(Boolean).forEach(x => { x.private = false; });
+    saveDB(); toast('Turno público', 'ok'); openSlot(d.id); render();
+  },
+  'pvt-allow': d => {
+    const t = getSlot(d.id); if (!t) return;
+    const ids = [...document.querySelectorAll('input[name="padd"]:checked')].map(x => x.value);
+    if (!ids.length) return toast('Marca al menos un socio', 'err');
+    const app = !!$('#pvt-notify')?.checked, ts = pvtTargets(t);
+    const label = slotsLabel(ts); ids.forEach(uid_ => ts.forEach((x, i) => allowInSlot(x.id, uid_, { email: false, app: app && i === 0, label })));
+    toast(`Permiso dado a ${ids.length} socio(s)`, 'ok'); openSlot(d.id); render();
+  },
+  'pvt-disallow': d => {
+    const t = getSlot(d.id), u = getUser(d.u); if (!t || !u) return;
+    const ts = pvtTargets(t);
+    confirmModal('Quitar permiso', `${esc(u.name)} dejará de ver este turno${ts.length > 1 ? ` (${ts.map(x => DOW[x.weekday]).join(', ')} a las ${t.time})` : ''}. Si está en el grupo fijo sale de él, y se le quitan sus próximas reservas en este turno (se le devuelve la clase).`, `data-a="pvt-disallow-ok" data-id="${t.id}" data-u="${u.id}" data-ids="${ts.map(x => x.id).join(',')}"`, 'Quitar permiso');
+  },
+  'session-workout': d => {
+    const s = getSession(d.id); if (!s) return;
+    const txt = d.clear ? '' : ($('#sess-workout')?.value || '').trim().slice(0, 4000);
+    const list = [s];
+    if (!d.clear && $('#wk-next')?.checked && s.templateId) list.push(...db.sessions.filter(x => x.templateId === s.templateId && x.id !== s.id && sessionStart(x) > sessionStart(s)));
+    list.forEach(x => { x.workout = txt; });
+    if (txt && $('#wk-notify')?.checked) bookedIn(s.id).forEach(b => notify(b.userId, `📋 Ya tienes el entrenamiento de ${classLabel(s)}. Míralo en «Mis clases».`));
+    saveDB(); toast(d.clear ? 'Entrenamiento quitado' : `Entrenamiento guardado${list.length > 1 ? ` en ${list.length} clases` : ''}`, 'ok'); openSession(s.id); render();
+  },
+  'pvt-disallow-ok': d => {
+    const t = getSlot(d.id); if (!t) return;
+    const ts = d.ids.split(',').map(getSlot).filter(Boolean);
+    const n = ts.reduce((a, x) => a + disallowInSlot(x.id, d.u), 0);
+    toast(`Permiso quitado${n ? ` · ${n} reserva(s) anuladas` : ''}`, 'ok'); openSlot(d.id); render();
+  },
   'group-add': d => {
     const ids = [...document.querySelectorAll('input[name="gadd"]:checked')].map(x => x.value);
     if (!ids.length) return toast('Marca al menos un cliente', 'err');
@@ -1782,11 +1871,15 @@ const forms = {
     const from = f.get('from'), to = f.get('to'), vd = String(f.get('visibleDays') || '').trim();
     const season = { startDate: from ? from + '-01' : null, endDate: to ? monthLastDay(to) : null, visibleDays: vd === '' ? null : Math.max(0, Number(vd)), color: f.get('color') || null };
     if (season.startDate && season.endDate && season.endDate < season.startDate) return toast('«Hasta» no puede ser antes que «Desde»', 'err');
-    const ids = wds.map(w => addScheduleSlot(w, f.get('time'), f.get('classTypeId'), cap && cap !== ct.capacity ? cap : null, season));
-    // socios elegidos: entran en el grupo de cada día y se les reservan sus clases
+    const pvt = !!f.get('private'), auto = !pvt || !!f.get('autobook');
     const people = f.getAll('gnew'); const nt = readNotify();
-    people.forEach(uid_ => ids.forEach(sid => addGroupMember(sid, uid_, nt)));
-    toast(`Turno creado (${wds.length} ${wds.length === 1 ? 'día' : 'días'})${people.length ? ` con ${people.length} socio${people.length === 1 ? '' : 's'}` : ''}`, 'ok'); closeModal(); render();
+    if (pvt && !people.length) return toast('Elige al menos un socio con permiso para el turno privado', 'err');
+    const ids = wds.map(w => addScheduleSlot(w, f.get('time'), f.get('classTypeId'), cap && cap !== ct.capacity ? cap : null, { ...season, private: pvt }));
+    // socios elegidos: entran en el grupo de cada día y se les reservan sus clases
+    // (en un turno privado sin reserva fija, solo reciben permiso y se apuntan ellos)
+    if (auto) people.forEach(uid_ => ids.forEach(sid => addGroupMember(sid, uid_, nt)));
+    else { const label = slotsLabel(ids.map(getSlot)); people.forEach(uid_ => ids.forEach((sid, i) => allowInSlot(sid, uid_, i === 0 ? { ...nt, label } : { email: false, app: false }))); }
+    toast(`${pvt ? '🔒 Turno privado' : 'Turno'} creado (${wds.length} ${wds.length === 1 ? 'día' : 'días'})${people.length ? ` con ${people.length} socio${people.length === 1 ? '' : 's'}` : ''}`, 'ok'); closeModal(); render();
   },
   multiadd: (f, form) => {
     const ids = f.getAll('sid');

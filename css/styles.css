@@ -682,3 +682,14 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .tabs { display: flex; gap: 6px; margin-bottom: 14px; overflow-x: auto; }
 .tabs button { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 7px 14px; border-radius: 99px; font-weight: 600; font-size: 13px; white-space: nowrap; }
 .tabs button.active { background: var(--text); color: var(--surface); border-color: var(--text); }
+
+/* Turnos privados y entrenamiento de la clase */
+.pvt-tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; vertical-align: middle;
+  background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--text); white-space: nowrap; }
+.session-workout { flex-basis: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; }
+.session-workout summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.session-workout .wk-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 8px; font-size: 14px; line-height: 1.5; }
+.pvt-card .pvt-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.pvt-card .pvt-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px 4px 10px; border-radius: 999px; border: 1px solid var(--border); font-size: 13px; }
+.pvt-card .pvt-chip button { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; padding: 0 4px; }
+.workout-edit { width: 100%; min-height: 140px; font-family: inherit; }

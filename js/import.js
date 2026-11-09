@@ -384,7 +384,10 @@ function purgeClients(ids) {
   const set = new Set(ids);
   // si era cliente de personal, su ficha de personal se queda (con su nombre) pero ya no enlazada al socio
   (db.ptClients || []).forEach(c => { if (set.has(c.memberId)) { c.name = getUser(c.memberId)?.name || c.name; c.memberId = null; } });
-  db.schedule.forEach(t => { if ((t.members || []).some(id => set.has(id))) t.members = t.members.filter(id => !set.has(id)); });
+  db.schedule.forEach(t => {
+    if ((t.members || []).some(id => set.has(id))) t.members = t.members.filter(id => !set.has(id));
+    if ((t.allowed || []).some(id => set.has(id))) t.allowed = t.allowed.filter(id => !set.has(id));
+  });
   db.bookings = db.bookings.filter(b => !set.has(b.userId));
   db.notifications = db.notifications.filter(n => !set.has(n.userId));
   db.emails = db.emails.filter(e => !set.has(e.userId));

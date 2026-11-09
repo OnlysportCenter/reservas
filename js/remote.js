@@ -50,7 +50,7 @@
   const TABLES = {
     plans: { db: 'plans', cols: { id: null, name: '', type: 'weekly', per_week: null, credits: null, duration_days: 30, price: 0 } },
     classTypes: { db: 'class_types', cols: { id: null, name: '', color: '#2F5D8A', coach: '', capacity: 20, duration: 60, description: '', hidden: false } },
-    schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null } },
+    schedule: { db: 'schedule', cols: { id: null, weekday: 1, time: '09:00', class_type_id: null, members: [], capacity: null, start_date: null, end_date: null, visible_days: null, color: null, private: false, allowed: [] } },
     users: { db: 'members', cols: { id: null, auth_id: null, name: '', email: '', phone: '', role: 'client', active: true, blocked: false, blocked_reason: '', weekly_limit: null, week_extras: {}, plan_id: null, credits: null, plan_expires: null, email_invalid: false, imported: false, created_at: TODAY, payment_due: false, payment_month: null, payment_answer: null, payment_answered_at: null, is_placeholder: false, fee: null, fee_iva: false, import_source: '', invited_at: null } },
     payments: { db: 'payments', cols: { id: null, user_id: null, month: null, status: 'paid', paid_at: null, method: 'Efectivo', base: 0, iva: false, total: 0, note: '', payer_name: '', created_at: NOW } },
     cashMoves: { db: 'cash_moves', cols: { id: null, date: null, concept: '', method: 'Efectivo', base: 0, iva: false, amount: 0, created_at: NOW } },
@@ -60,7 +60,7 @@
     importLogs: { db: 'import_logs', cols: { id: null, at: NOW, file: '', created: [], updated: [], group_adds: [] } },
     ptSessions: { db: 'pt_sessions', cols: { id: null, client_id: null, date: null, routine: '', notes: '', exercises: [], created_at: NOW } },
     prospects: { db: 'prospects', cols: { id: null, name: '', last_name: '', phone: '', email: '', note: '', created_at: NOW } },
-    sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false } },
+    sessions: { db: 'sessions', cols: { id: null, template_id: null, class_type_id: null, date: null, time: '09:00', duration: 60, capacity: 20, coach: '', cancelled: false, hidden: false, workout: '' } },
     bookings: { db: 'bookings', cols: { id: null, session_id: null, user_id: null, status: 'booked', source: null, created_at: NOW, reminded: false, block_removed: false, group_removed: false, cancelled_from: null } },
     announcements: { db: 'announcements', cols: { id: null, title: '', body: '', date: NOW, pinned: false } },
     notifications: { db: 'notifications', cols: { id: null, user_id: null, text: '', type: 'info', date: NOW, read: false } },
@@ -168,7 +168,7 @@
       }
     }
     const mineSet = new Set(myGroups.map(g => g.id));
-    sched.forEach(t => { t.members = mineSet.has(t.id) && myId ? [myId] : []; delete t.mine; });
+    sched.forEach(t => { t.members = mineSet.has(t.id) && myId ? [myId] : []; t.allowed = t.allowed_me && myId ? [myId] : []; delete t.mine; delete t.allowed_me; });
     const sesIds = new Set(sessions.map(s => s.id));
     const bookings = mine.filter(b => sesIds.has(b.session_id)).map(b => ({ ...b, wait_position: b.wait_position }));
     applyLoaded(settings, { plans, classTypes: cts, schedule: sched, users: me, sessions, bookings, announcements: anns, notifications: notifs, emails: [], prospects: [], payments: [], cashMoves: [], workouts: [], exercises: [], ptClients: [], ptSessions: [], importLogs: [] });
@@ -190,7 +190,7 @@
   function migrateServer() {
     db.users.forEach(u => { u.weekExtras = u.weekExtras || {}; });
     if (db.settings && db.settings.importLog) delete db.settings.importLog;   // nunca en los ajustes: los lee cualquiera
-    db.schedule.forEach(t => { t.members = t.members || []; });
+    db.schedule.forEach(t => { t.members = t.members || []; t.allowed = t.allowed || []; });
   }
   const reload = () => enqueue(async () => { await flushNow(); role === 'admin' ? await loadAdmin() : await loadClient(); });
   window.reloadData = () => reload();   // botón «Actualizar» del panel
