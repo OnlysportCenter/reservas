@@ -1,3 +1,9 @@
+// Protección contra clickjacking: la app nunca funciona metida dentro de otra web (marco / iframe)
+if (window.top !== window.self) {
+  document.documentElement.style.display = 'none';
+  try { window.top.location = window.location.href; } catch (e) { /* el marco no deja salir: se queda oculta */ }
+  throw new Error('La app no se puede abrir dentro de otra página.');
+}
 // ============================================================
 //  CAPA DE DATOS (prototipo: guarda todo en localStorage)
 //  Más adelante se sustituirá por un servidor/base de datos real

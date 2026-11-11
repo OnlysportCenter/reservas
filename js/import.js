@@ -93,7 +93,10 @@ async function readExcel(file) {
   await loadSheetJS();
   const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { defval: '', raw: false, dateNF: 'dd/mm/yyyy' });
+  // las fechas se toman del valor real de la celda (no del formato, que puede ser americano: 1/15/26)
+  const p2 = n => String(n).padStart(2, '0');
+  return XLSX.utils.sheet_to_json(ws, { defval: '', raw: true }).map(r => Object.fromEntries(Object.entries(r).map(([k, v]) =>
+    [k, v instanceof Date ? (isNaN(v) ? '' : `${p2(v.getDate())}/${p2(v.getMonth() + 1)}/${v.getFullYear()}`) : String(v ?? '')])));
 }
 
 // ---------- Detección automática ----------
