@@ -260,12 +260,14 @@ function paymentBanner(u) {
 const pvtTag = s => isPrivate(s) ? '<span class="pvt-tag" title="Solo para un grupo concreto">🔒 Grupo especial</span>' : '';
 const workoutBlock = s => (s.workout || '').trim() && !s.cancelled
   ? `<details class="session-workout"><summary>📋 Entrenamiento de la clase</summary><div class="wk-text">${esc(s.workout.trim())}</div></details>` : '';
-// Una clase cancelada solo la ve el socio si tenía plaza en ella, o si es la única a esa hora (p. ej. un festivo).
-// Las que vienen de un turno borrado o rehecho no le importan a nadie más y confundirían.
+// Clases canceladas en la app del socio:
+// - si a esa hora hay otra clase activa (turno rehecho), la cancelada no se enseña nunca: confunde
+// - si no, la ve quien tenía plaza en ella, y todos cuando es de un turno que sigue existiendo (p. ej. un festivo)
 function clientSeesCancelled(userId, s) {
   if (!s.cancelled) return true;
+  if (sessionsOn(s.date).some(x => x.id !== s.id && x.time === s.time && !x.cancelled && isVisibleToClients(x))) return false;
   if (db.bookings.some(b => b.sessionId === s.id && b.userId === userId)) return true;
-  return !sessionsOn(s.date).some(x => x.id !== s.id && x.time === s.time && !x.cancelled && isVisibleToClients(x));
+  return !!(s.templateId && db.schedule.some(t => t.id === s.templateId));
 }
 function viewClientBook() {
   const u = me();
