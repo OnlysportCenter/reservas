@@ -260,12 +260,19 @@ function paymentBanner(u) {
 const pvtTag = s => isPrivate(s) ? '<span class="pvt-tag" title="Solo para un grupo concreto">🔒 Grupo especial</span>' : '';
 const workoutBlock = s => (s.workout || '').trim() && !s.cancelled
   ? `<details class="session-workout"><summary>📋 Entrenamiento de la clase</summary><div class="wk-text">${esc(s.workout.trim())}</div></details>` : '';
+// Una clase cancelada solo la ve el socio si tenía plaza en ella, o si es la única a esa hora (p. ej. un festivo).
+// Las que vienen de un turno borrado o rehecho no le importan a nadie más y confundirían.
+function clientSeesCancelled(userId, s) {
+  if (!s.cancelled) return true;
+  if (db.bookings.some(b => b.sessionId === s.id && b.userId === userId)) return true;
+  return !sessionsOn(s.date).some(x => x.id !== s.id && x.time === s.time && !x.cancelled && isVisibleToClients(x));
+}
 function viewClientBook() {
   const u = me();
   const ahead = clientDaysAhead();
   if (state.date > dateKey(addDays(new Date(), ahead)) || state.date < dateKey(new Date())) state.date = dateKey(new Date());
   fixClientDate(ahead);
-  const list = sessionsOn(state.date).filter(s => isVisibleToClients(s) && canSeeSession(u.id, s));
+  const list = sessionsOn(state.date).filter(s => isVisibleToClients(s) && canSeeSession(u.id, s) && clientSeesCancelled(u.id, s));
   const ps = planStatus(u);
   const now = new Date();
   return `
