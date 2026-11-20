@@ -722,10 +722,10 @@ function defaultSeasonEnd() {
   const d = new Date(); const y = d.getMonth() >= 6 ? d.getFullYear() + 1 : d.getFullYear();
   return `${y}-06-30`;
 }
-function removeScheduleSlot(slotId) {
+function removeScheduleSlot(slotId, { email = true, app = true } = {}) {
   const now = new Date();
   db.sessions.filter(s => s.templateId === slotId && sessionStart(s) > now).forEach(s => {
-    if (bookedIn(s.id).length || waitlistOf(s.id).length) cancelSession(s.id, 'cambio de horario');
+    if (bookedIn(s.id).length || waitlistOf(s.id).length) cancelSession(s.id, 'cambio de horario', email, app);
     else db.sessions = db.sessions.filter(x => x.id !== s.id);
   });
   db.schedule = db.schedule.filter(t => t.id !== slotId);

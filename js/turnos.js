@@ -1,19 +1,13 @@
 // ============================================================
-// Pestaña «Turnos»: una tarjeta por hora (9:15, 10:30, 17:30…) con todos los socios que vienen
-// a esa hora. Cada socio lleva sus casillas L M X J V: encendida = viene ese día (está en el
+// Pestaña «Turnos»: una tarjeta por turno. A una misma hora puede haber varios (9:15 L-X-V «tres días»
+// y 9:15 M-J «dos días»); se detectan por los días que comparten los socios (ver splitHour). Cada socio lleva sus casillas L M X J V: encendida = viene ese día (está en el
 // grupo fijo de ese día a esa hora). Pulsar una casilla le mete o le quita de ese día.
 // Los socios se ordenan por sus días (primero los de más días) en apartados: «L · X · V», «Solo X»…
 // ============================================================
 const ORD = w => (w + 6) % 7;            // lunes primero
+const DAYS_TXT = n => ({ 1: 'un día', 2: 'dos días', 3: 'tres días', 4: 'cuatro días', 5: 'cinco días', 6: 'seis días' }[n] || `${n} días`);
 const hhmm = t => t.replace(/^0/, '');
 const isClient = id => getUser(id)?.role === 'client';
-
-// Días que se enseñan como columnas: lunes a viernes, y sábado/domingo solo si hay clases fijas esos días
-function turnColumns() {
-  const cols = [1, 2, 3, 4, 5];
-  [6, 0].forEach(w => { if (db.schedule.some(t => t.weekday === w && getClassType(t.classTypeId))) cols.push(w); });
-  return cols;
-}
 
 // Días fijos que tiene cada socio en total (todas las horas)
 function fixedDaysCount() {
@@ -29,7 +23,6 @@ function patternLabel(days) {
 }
 
 function buildHours() {
-  const cols = turnColumns();
   const byTime = {};
   db.schedule.forEach(t => {
     if (!getClassType(t.classTypeId)) return;
@@ -41,14 +34,17 @@ function buildHours() {
       h.people.get(id).add(t.weekday);
     });
   });
-  return Object.values(byTime).map(h => {
-    const perDay = cols.map(w => {
+  return Object.values(byTime).flatMap(h => splitHour(h).map(days => ({ ...h, days, split: days.split })))
+    .map(h => {
+    const inG = new Set(h.days);
+    const perDay = h.days.map(w => {
       const t = h.slots[w];
-      if (!t) return { w, t: null };
       const cap = slotCapacity(t), used = (t.members || []).filter(isClient).length;
       return { w, t, cap, used, free: cap - used };
     });
-    const members = [...h.people.entries()].map(([id, set]) => ({ u: getUser(id), days: [...set].sort((a, b) => ORD(a) - ORD(b)) }));
+    const members = [...h.people.entries()]
+      .map(([id, set]) => { const all = [...set].sort((a, b) => ORD(a) - ORD(b)); return { u: getUser(id), days: all.filter(w => inG.has(w)), other: all.filter(w => !inG.has(w)) }; })
+      .filter(m => m.days.length);
     // orden: primero los que vienen más días; a igualdad, por días (L antes que M…) y luego por nombre
     members.sort((a, b) => b.days.length - a.days.length || a.days.map(ORD).join('').localeCompare(b.days.map(ORD).join('')) || a.u.name.localeCompare(b.u.name));
     const groups = [];
@@ -61,13 +57,32 @@ function buildHours() {
     const open = perDay.filter(d => d.t);
     const free = open.reduce((a, d) => a + Math.max(0, d.free), 0);
     const anyT = open[0]?.t;
-    return { time: h.time, perDay, members, groups, free, over: open.some(d => d.free < 0), color: anyT ? slotColor(anyT) : '#2F5D8A' };
-  }).sort((a, b) => a.time.localeCompare(b.time));
+    return { key: h.time + '|' + h.days.join(''), time: h.time, days: h.days, split: h.split, perDay, members, groups, free, over: open.some(d => d.free < 0), color: anyT ? slotColor(anyT) : '#2F5D8A' };
+  }).sort((a, b) => a.time.localeCompare(b.time) || b.days.length - a.days.length || ORD(a.days[0]) - ORD(b.days[0]));
+}
+
+// Reparte los días de una hora en turnos (p. ej. 9:15 → L-X-V «tres días» y M-J «dos días»).
+// Un turno es una combinación de días que comparten varios socios; se cogen de la más repetida
+// a la menos, sin que se pisen. Los días que no encajan en ninguna quedan como un turno aparte.
+function splitHour(h) {
+  const all = Object.keys(h.slots).map(Number).sort((a, b) => ORD(a) - ORD(b));
+  const freq = new Map();
+  h.people.forEach(set => { const k = [...set].sort((a, b) => ORD(a) - ORD(b)).join(''); freq.set(k, (freq.get(k) || 0) + 1); });
+  const pats = [...freq.entries()].map(([k, n]) => ({ days: k.split('').map(Number), n }))
+    .sort((a, b) => b.n - a.n || b.days.length - a.days.length);
+  const used = new Set(), turns = [];
+  pats.forEach((p, i) => {
+    if (p.days.length < 2 && turns.length) return;               // un solo día no forma turno propio si ya hay otro
+    if ((p.n >= 2 || i === 0) && p.days.every(w => !used.has(w))) { turns.push(p.days); p.days.forEach(w => used.add(w)); }
+  });
+  const rest = all.filter(w => !used.has(w));
+  if (rest.length) turns.push(rest);
+  const out = turns.length ? turns : [all];
+  return out.map(d => Object.assign([...d], { split: out.length > 1 }));
 }
 
 function viewAdminTurns() {
   const hours = buildHours();
-  const cols = turnColumns();
   const q = norm2(state.search);
   const withPeople = hours.filter(h => h.members.length);
   const totalMembers = new Set(withPeople.flatMap(h => h.members.map(m => m.u.id))).size;
@@ -90,6 +105,7 @@ function viewAdminTurns() {
         <span class="n">${i}</span>
         <span class="grow ellipsis clickable" data-a="client-open" data-id="${m.u.id}" title="Abrir ficha">${esc(m.u.name)}</span>
         ${tooMany ? `<span class="mtag warn" title="Viene ${total} días en total y su tarifa es de ${p.perWeek}">${total}/${p.perWeek} días</span>` : ''}
+        ${m.other.length ? `<span class="mtag" title="También viene a las ${hhmm(h.time)} el ${m.other.map(w => DOW_LONG[w].toLowerCase()).join(' y el ')} (en el otro turno de esta hora)">+${m.other.map(w => DAY_LETTER[w]).join('')}</span>` : ''}
         ${m.u.blocked ? '<span class="mtag danger">🔒</span>' : m.u.paymentDue ? '<span class="mtag warn">💶</span>' : ''}${!p ? '<span class="mtag">Sin tarifa</span>' : ''}
         <span class="turn-dbox">${h.perDay.map(d => d.t
           ? `<button class="${set.has(d.w) ? 'on' : ''}" data-a="turn-day" data-t="${h.time}" data-w="${d.w}" data-id="${m.u.id}" title="${set.has(d.w) ? 'Viene' : 'No viene'} el ${DOW_LONG[d.w].toLowerCase()} · pulsa para ${set.has(d.w) ? 'quitarle' : 'apuntarle'}">${DAY_LETTER[d.w]}</button>`
@@ -98,14 +114,14 @@ function viewAdminTurns() {
     };
     return `<div class="card turn-card ${h.members.length ? '' : 'is-empty'}" style="--c:${h.color}">
       <div class="turn-head">
-        <div><div class="turn-title">TURNO ${hhmm(h.time)}</div>
-          <div class="muted small">${h.groups.length > 1 ? `${h.groups.length} combinaciones de días` : h.groups.length ? h.groups[0].label : 'Sin socios todavía'}</div></div>
+        <div><div class="turn-title">TURNO ${hhmm(h.time)} <span>· ${DAYS_TXT(h.days.length)}</span></div>
+          <div class="muted small">${h.days.map(w => DOW_LONG[w]).join(', ')}${h.members.length ? '' : ' · sin socios todavía'}</div></div>
         <div class="turn-nums">
           <div><b>${h.members.length}</b><span>${h.members.length === 1 ? 'socio' : 'socios'}</span></div>
           <div><b class="${freeCls}">${h.free}</b><span>huecos/sem.</span></div>
         </div>
       </div>
-      <div class="turn-days turn-days-grid" style="--n:${cols.length}">${h.perDay.map(d => d.t
+      <div class="turn-days turn-days-grid" style="--n:${h.days.length}">${h.perDay.map(d => d.t
         ? `<button class="${d.free <= 0 ? 'full' : ''}" data-a="slot-open" data-id="${d.t.id}" title="${DOW_LONG[d.w]}: ${d.used} de ${d.cap} plazas ocupadas por fijos · pulsa para abrir el grupo"><b>${DAY_LETTER[d.w]}</b>${d.used}/${d.cap}</button>`
         : `<span class="na" title="No hay clase el ${DOW_LONG[d.w].toLowerCase()} a esta hora"><b>${DAY_LETTER[d.w]}</b>—</span>`).join('')}</div>
       ${h.over ? '<div class="turn-warn">⚠️ Algún día está por encima del aforo.</div>' : ''}
@@ -162,7 +178,7 @@ function printTurns() {
     td{padding:2px 0;border-bottom:1px solid #eee}td.d{width:16px;text-align:center;font-weight:700;color:#bbb}td.d.on{color:#111}
     tr.h td{font-weight:700;color:#555;padding-top:6px;border-bottom:1px solid #ccc}</style></head><body>
     <h1>Turnos · ${esc(db.settings.centerName)}</h1><p>${fmtDateLong(dateKey(new Date()))}</p><div class="g">
-    ${hours.map(h => `<div class="t"><h2>TURNO ${hhmm(h.time)}</h2>
+    ${hours.map(h => `<div class="t"><h2>TURNO ${hhmm(h.time)} · ${DAYS_TXT(h.days.length)} (${h.days.map(x => DAY_LETTER[x]).join('-')})</h2>
       <div class="s">${h.members.length} socios · ${h.perDay.filter(d => d.t).map(d => `${DAY_LETTER[d.w]} ${d.used}/${d.cap}`).join(' · ')}</div>
       <table>${h.groups.map(g => `<tr class="h"><td colspan="${1 + h.perDay.length}">${esc(g.label)} (${g.members.length})</td></tr>
         ${g.members.map(m => `<tr><td>${esc(m.u.name)}</td>${h.perDay.map(d => `<td class="d ${m.days.includes(d.w) ? 'on' : ''}">${d.t ? (m.days.includes(d.w) ? DAY_LETTER[d.w] : '·') : ''}</td>`).join('')}</tr>`).join('')}`).join('')}</table></div>`).join('')}

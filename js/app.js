@@ -590,14 +590,19 @@ function toggleSilentAdd() {
 }
 
 function viewAdminAgenda() {
-  const list = sessionsOn(state.date);
+  // Clases canceladas repetidas: si se borró un horario y se volvió a crear, la clase vieja queda
+  // cancelada y «suelta» (como clase extra) junto a la nueva. No se enseña si a esa hora hay otra activa.
+  const all = sessionsOn(state.date);
+  const isDup = s => s.cancelled && !s.templateId && all.some(x => x.id !== s.id && x.time === s.time && !x.cancelled);
+  const list = all.filter(s => !isDup(s)), dups = all.filter(isDup);
   return `
     <div class="page-title"><h1>Agenda</h1><div class="row wrap">
       <button class="btn" data-a="holiday" data-d="${state.date}">🎉 Día festivo</button>
       <button class="btn primary" data-a="extra-session">${icon('plus', 'width="18" height="18"')}Clase extra</button></div></div>
     ${dayStrip(-7, db.settings.bookWindowDays + 7)}
     ${dayTitle(state.date)}
-    <div class="stack">${list.length ? list.map(adminSessionCard).join('') : '<div class="card empty">No hay clases este día.</div>'}</div>`;
+    <div class="stack">${list.length ? list.map(adminSessionCard).join('') : '<div class="card empty">No hay clases este día.</div>'}</div>
+    ${dups.length ? `<p class="muted small" style="margin-top:10px">No se muestra${dups.length === 1 ? '' : 'n'} ${dups.length} ${dups.length === 1 ? 'clase cancelada' : 'clases canceladas'} de un horario que se borró (${dups.map(s => s.time).join(', ')}). Los socios tampoco la${dups.length === 1 ? '' : 's'} ven.</p>` : ''}`;
 }
 
 function openSession(id) {
@@ -1814,8 +1819,12 @@ const actions = {
   'sched-tab': d => { state.schedTab = d.t; render(); },
   'slot-add': () => openSlotForm(false),
   'turn-days': d => { const f = document.querySelector('.turn-form'); if (!f) return; f.querySelectorAll('input[name="wd"]').forEach(i => { i.checked = d.d.includes(i.value); }); turnFormUpdate(); },
-  'slot-del': d => confirmModal('Quitar horario', 'Se eliminarán las próximas clases de este horario. Si hay clientes apuntados se les avisará y se les devolverá la clase.', `data-a="slot-del-ok" data-id="${d.id}"`, 'Quitar'),
-  'slot-del-ok': d => { removeScheduleSlot(d.id); closeModal(); render(); },
+  'slot-del': d => openModal(`${modalHead('Quitar horario')}
+    <p>Se eliminarán las próximas clases de este horario. Si hay clientes apuntados, se les cancela la reserva y se les devuelve la clase.</p>
+    <div class="small">${notifyChecks(false, false)}</div>
+    <p class="muted small">Si no marcas nada, no les llega ningún correo ni aviso.</p>
+    <div class="modal-actions"><button class="btn" data-a="close">Volver</button><button class="btn danger" data-a="slot-del-ok" data-id="${d.id}">Quitar</button></div>`),
+  'slot-del-ok': d => { const nt = readNotify(); removeScheduleSlot(d.id, nt); closeModal(); render(); toast(nt.email || nt.app ? 'Horario quitado y clientes avisados' : 'Horario quitado (sin avisos)', 'ok'); },
   'ct-edit': d => openClassTypeForm(d.id),
   'ct-del': d => confirmModal('Eliminar tipo de clase', 'Se eliminarán también todos sus horarios y próximas clases.', `data-a="ct-del-ok" data-id="${d.id}"`, 'Eliminar'),
   'ct-del-ok': d => { deleteClassType(d.id); closeModal(); render(); },
