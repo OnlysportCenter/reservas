@@ -941,11 +941,13 @@ function viewAdminClientsList(tabs = '') {
   const fk = state.clientFilter || 'all', f = filters[fk] || filters.all;
   const pool = k => k === 'ph' ? placeholders() : realClients();
   const list = pool(fk).filter(c => (!q || norm2(c.name).includes(q) || norm2(c.email).includes(q)) && f[1](c)).sort((a, b) => a.name.localeCompare(b.name));
+  state.clientListIds = list.map(c => c.id);   // para «Descargar» lo que estás viendo
   const selMode = !!state.selectMode && fk !== 'ph';
   return `
     <div class="page-title"><h1>Clientes <span class="muted" style="font-size:15px">(${realClients().length})</span></h1><div class="row wrap">
       <button class="btn" data-a="select-mode">${selMode ? 'Terminar selección' : '☑️ Seleccionar'}</button>
       <button class="btn" data-a="import">⬆️ Importar</button>
+      <button class="btn" data-a="clients-export" title="Descargar la lista de clientes en Excel o copiar sus correos">⬇️ Descargar</button>
       <button class="btn" data-a="ph-new" title="Usuario sin correo para reservar plazas tú mismo">🃏 Comodín</button>
       <button class="btn primary" data-a="client-edit">${icon('plus', 'width="18" height="18"')}Nuevo</button></div></div>
     ${tabs}

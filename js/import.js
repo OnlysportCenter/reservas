@@ -487,3 +487,66 @@ document.addEventListener('change', e => {
   else if (t.dataset.impDefaultPlan !== undefined) { imp.opts.defaultPlan = t.value; }
   else if (t.dataset.impOpt) { imp.opts[t.dataset.impOpt] = t.checked; renderImport(); }
 });
+
+// ============================================================
+//  DESCARGAR LA LISTA DE CLIENTES (Excel) o copiar sus correos
+// ============================================================
+function exportPeople(mode) {
+  const sel = state.sel && state.sel.size ? [...state.sel] : [];
+  const ids = mode === 'sel' ? sel : mode === 'view' ? (state.clientListIds || []) : realClients().map(c => c.id);
+  return ids.map(getUser).filter(u => u && !u.isPlaceholder).sort((a, b) => a.name.localeCompare(b.name));
+}
+function openClientsExport() {
+  const all = realClients().length, view = (state.clientListIds || []).length, sel = state.sel ? state.sel.size : 0;
+  const opt = (v, label, n, on) => `<label class="check"><input type="radio" name="exp-who" value="${v}" ${on ? 'checked' : ''}> ${label} <span class="muted">(${n})</span></label>`;
+  openModal(`${modalHead('⬇️ Descargar clientes')}
+    <div class="field"><label>¿Qué clientes?</label>
+      ${opt('all', 'Todos los clientes', all, true)}
+      ${view !== all ? opt('view', 'Solo los de la lista que estás viendo (filtro o búsqueda)', view) : ''}
+      ${sel ? opt('sel', 'Solo los que tienes seleccionados', sel) : ''}</div>
+    <div class="stack" style="gap:8px">
+      <button class="btn primary block" data-a="clients-export-xlsx">📊 Descargar Excel (nombre, correo, teléfono, tarifa, grupos…)</button>
+      <button class="btn block" data-a="clients-export-emails">✉️ Copiar solo los correos (para pegarlos en Gmail)</button>
+    </div>
+    <div id="exp-emails" hidden style="margin-top:10px">
+      <textarea class="workout-edit" style="min-height:90px" readonly></textarea>
+      <p class="muted small" style="margin:4px 0 0">Pégalos en el campo <b>CCO</b> del correo, así nadie ve el correo de los demás.</p>
+    </div>
+    <p class="muted small" style="margin-top:10px">🔒 El archivo lleva datos personales: guárdalo solo en tu ordenador o tu Drive y no lo compartas.</p>`);
+}
+async function exportClientsXlsx(people) {
+  await loadSheetJS();
+  const yes = v => v ? 'Sí' : 'No';
+  const rows = people.map(u => ({
+    'Nombre': u.name, 'Correo': u.email || '', 'Teléfono': u.phone || '',
+    'Tarifa': getPlan(u.planId)?.name || 'Sin tarifa',
+    'Grupos': groupsOf(u.id).map(t => `${DOW[t.weekday]} ${t.time}`).join(', '),
+    'Activo': yes(u.active), 'Bloqueado': yes(u.blocked), 'Cuota pendiente': yes(u.paymentDue),
+    'Ha entrado en la app': yes(!!u.authId), 'Alta': u.createdAt ? String(u.createdAt).slice(0, 10) : '',
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{ wch: 28 }, { wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 28 }, { wch: 7 }, { wch: 10 }, { wch: 15 }, { wch: 18 }, { wch: 11 }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
+  XLSX.writeFile(wb, `clientes-${dateKey(new Date())}.xlsx`);
+}
+Object.assign(actions, {
+  'clients-export': () => { if (isAdmin()) openClientsExport(); },
+  'clients-export-xlsx': async (d, el) => {
+    if (!isAdmin()) return;
+    const people = exportPeople(document.querySelector('input[name="exp-who"]:checked')?.value || 'all');
+    if (!people.length) return toast('No hay clientes en esa lista', 'err');
+    el.disabled = true;
+    try { await exportClientsXlsx(people); toast(`Descargado: ${people.length} clientes`, 'ok'); closeModal(); }
+    catch (e) { toast(e.message || 'No se pudo descargar', 'err'); el.disabled = false; }
+  },
+  'clients-export-emails': async () => {
+    if (!isAdmin()) return;
+    const people = exportPeople(document.querySelector('input[name="exp-who"]:checked')?.value || 'all');
+    const mails = [...new Set(people.filter(u => u.email && !u.emailInvalid).map(u => u.email.trim().toLowerCase()))];
+    if (!mails.length) return toast('Ninguno de esos clientes tiene correo', 'err');
+    const box = $('#exp-emails'), ta = box.querySelector('textarea');
+    ta.value = mails.join(', '); box.hidden = false; ta.select();
+    try { await navigator.clipboard.writeText(ta.value); toast(`${mails.length} correos copiados`, 'ok'); }
+    catch (e) { toast('Selecciónalos y cópialos (Ctrl+C)', ''); }
+  },
+});
