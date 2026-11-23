@@ -187,7 +187,7 @@ function viewTurnDetail() {
       </div>
     </div>`;
   };
-  return `
+  return `<div class="turn-detail" style="--c:${h.color}">
     <div class="page-title"><div><button class="btn sm ghost" data-a="turn-close">← Todos los turnos</button>
       <h1 style="margin-top:8px">Turno ${hhmm(h.time)} · ${DAYS_TXT(h.days.length)}</h1>
       <div class="muted">${h.days.map(w => DOW_LONG[w]).join(', ')}</div></div>
@@ -212,7 +212,7 @@ function viewTurnDetail() {
       <div class="section-h" style="margin-top:0">Socios del turno</div>
       ${h.members.length ? h.groups.map(g => `<div class="turn-sub"><span>${esc(g.label)}</span><span>${g.members.length}</span></div>${g.members.map(row).join('')}`).join('')
         : '<p class="muted">Todavía no hay nadie en este turno. Añádelos arriba.</p>'}
-    </div>`;
+    </div></div>`;
 }
 
 // Apunta a un socio a varios días a esa hora / le quita de ellos (siempre sin avisos)

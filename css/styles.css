@@ -732,3 +732,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--f-display); letter-
 .td-cands { margin-top: 8px; display: flex; flex-direction: column; }
 .td-cand { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--border); }
 @media (max-width: 640px) { .td-dayscards { grid-template-columns: 1fr 1fr; } .td-acts { width: 100%; padding-left: 34px; } }
+/* Casillas y plazas legibles en claro y en oscuro */
+.turn-dbox button.on { color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,.25); }
+.turn-dbox button:not(.on):not(.na) { background: var(--surface); color: var(--muted); }
+.td-cap input { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 8px; }
