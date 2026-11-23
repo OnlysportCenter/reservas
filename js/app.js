@@ -124,7 +124,7 @@ function render() {
         ${u.role === 'admin' ? `<button class="icon-btn" data-a="admin-theme" aria-label="Cambiar a modo ${document.documentElement.dataset.theme === 'dark' ? 'claro' : 'oscuro'}" title="Modo ${document.documentElement.dataset.theme === 'dark' ? 'claro' : 'oscuro'} (solo en este ordenador)">${icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')}</button>` : ''}
         <button class="icon-btn" data-a="logout" aria-label="Salir" title="Cerrar sesión">${icon('out')}</button>
       </header>
-      <main class="content">${(views[state.view] || views[nav[0][0]])()}</main>
+      <main class="content">${u.role === 'admin' ? quietBar() : ''}${(views[state.view] || views[nav[0][0]])()}</main>
       <nav class="bottomnav">${nav.map(([v, ic, l]) => `<button class="${state.view === v ? 'active' : ''} ${u.role === 'admin' && !ADMIN_MAIN.includes(v) ? 'nav-extra' : ''}" data-a="nav" data-v="${v}">${icon(ic)}<span>${l}</span></button>`).join('')}
         ${u.role === 'admin' ? (() => { const cur = nav.find(([v]) => v === state.view && !ADMIN_MAIN.includes(v));
           return `<button class="nav-more ${cur ? 'active' : ''}" data-a="nav-more" aria-label="Más secciones">${icon(cur ? cur[1] : 'menu')}<span>${cur ? cur[2] : 'Más'}</span></button>`; })() : ''}</nav>
@@ -533,8 +533,8 @@ function viewAdminToday() {
   return `
     <div class="page-title"><h1>${(() => { const h = new Date().getHours(); return h < 13 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches'; })()}</h1></div>
     <div class="row between wrap" style="margin-bottom:14px"><p class="admin-hello" style="margin:0">${fmtDateLong(today)} · ${ss.length} ${ss.length === 1 ? 'clase' : 'clases'} hoy</p>
-      <button class="silent-switch ${db.settings.silentAdminAdd ? 'on' : ''}" data-a="silent-toggle" title="Cuando apuntas tú a alguien en una clase">
-        <span class="sw"><i></i></span>${db.settings.silentAdminAdd ? '🔕 No aviso a nadie cuando apunto yo' : '🔔 Aviso a los clientes cuando les apunto'}</button></div>
+      <button class="silent-switch ${quietMode() ? 'on' : ''}" data-a="quiet-toggle" title="Ningún correo ni aviso a los socios mientras esté activado">
+        <span class="sw"><i></i></span>${quietMode() ? '🔕 No aviso a nadie' : '🔔 Los socios reciben avisos'}</button></div>
     <div class="grid-stats">
       <div class="card kpi" style="--k:#2F5D8A"><div class="kpi-ic">${icon('users')}</div><div><div class="v">${active.length}</div><div class="l">Socios activos</div></div></div>
       <div class="card kpi" style="--k:#1F7A45"><div class="kpi-ic">${icon('check')}</div><div><div class="v">${booked}</div><div class="l">Reservas hoy</div></div></div>
@@ -572,15 +572,26 @@ function adminSessionCard(s) {
 }
 
 // Casillas para elegir cómo avisar al cliente
-const notifyChecks = (email = true, app = true) => `
+const notifyChecks = (email = true, app = true) => quietMode()
+  ? `<div class="quiet-note">🔕 <b>No avisar a nadie</b> está activado: no se enviará ningún correo ni aviso.</div>`
+  : `
   <label class="check"><input type="checkbox" id="n-email" ${email ? 'checked' : ''}> ✉️ Avisar por correo</label>
   <label class="check"><input type="checkbox" id="n-app" ${app ? 'checked' : ''}> 🔔 Avisar en la app</label>`;
 const readNotify = () => ({ email: !!$('#n-email')?.checked, app: !!$('#n-app')?.checked });
 // Casillas para cuando YO apunto a alguien: si «No avisar cuando apunto yo» está activo, no hay casillas y no se avisa
-const addNotify = (email = true, app = true) => `<div class="notify-block" data-e="${email ? 1 : 0}" data-ap="${app ? 1 : 0}">${db.settings.silentAdminAdd
+const addNotify = (email = true, app = true) => quietMode() ? notifyChecks() : `<div class="notify-block" data-e="${email ? 1 : 0}" data-ap="${app ? 1 : 0}">${db.settings.silentAdminAdd
   ? `<div class="silent-note"><span>🔕 <b>Avisos desactivados</b> cuando apuntas tú: no se enviará correo ni aviso en la app.</span>
       <button type="button" class="btn sm" data-a="silent-toggle">Volver a avisar</button></div>`
   : `${notifyChecks(email, app)}<button type="button" class="silent-link" data-a="silent-toggle">🔕 No avisar a nadie cuando apunto yo</button>`}</div>`;
+// Franja arriba de todas las páginas del administrador cuando no se avisa a nadie
+const quietBar = () => quietMode() ? `<div class="quiet-bar">🔕 <span><b>No avisar a nadie</b> está activado: ningún socio recibe correos ni avisos.</span><button class="btn sm" data-a="quiet-toggle">Volver a avisar</button></div>` : '';
+function toggleQuiet() {
+  if (quietMode()) {
+    confirmModal('Volver a avisar', 'A partir de ahora los socios volverán a recibir los avisos y correos de la app (cancelaciones, lista de espera, recordatorios…). Lo que pasó mientras estaba activado <b>no</b> se les envía.', 'data-a="quiet-off-ok"', 'Volver a avisar', false);
+    return;
+  }
+  db.settings.quietMode = true; saveDB(); toast('🔕 No se avisará a nadie hasta que lo vuelvas a activar', 'ok'); render();
+}
 function toggleSilentAdd() {
   db.settings.silentAdminAdd = !db.settings.silentAdminAdd;
   saveDB();
@@ -1435,6 +1446,7 @@ function viewAdminSettings() {
         <div class="field"><label>Máximo en lista de espera</label><input name="waitlistMax" type="number" min="1" max="50" value="${s.waitlistMax}"></div>
       </div>
       <label class="check"><input type="checkbox" name="onePerDay" ${s.onePerDay ? 'checked' : ''}> Máximo una clase al día por cliente</label>
+      <label class="check silent-check"><input type="checkbox" name="quietMode" ${s.quietMode ? 'checked' : ''}> 🔕 <span><b>No avisar a nadie</b> (ni por correo ni en la app), pase lo que pase<br><span class="muted small">Para cuando estás probando o reorganizando. No sale ningún aviso: ni al apuntar o quitar, ni al cancelar, ni de lista de espera, recordatorios o cuotas. Solo se envía lo que mandas tú a propósito (la invitación a la app).</span></span></label>
       <label class="check silent-check"><input type="checkbox" name="silentAdminAdd" ${s.silentAdminAdd ? 'checked' : ''}> 🔕 <span><b>No avisar a ningún usuario (ni por correo ni en la app) cuando soy yo quien les apunta en las clases</b><br><span class="muted small">Útil si vas apuntando a la gente de uno en uno y no quieres llenarles el correo. Los avisos de lista de espera, cancelaciones y cuotas siguen funcionando.</span></span></label>
       <div class="field"><label>Días que aparecen en la app de los socios</label>
         <div class="row wrap">${[1, 2, 3, 4, 5, 6, 0].map(w => `<label class="tab-radio"><input type="checkbox" name="showDay" value="${w}" ${(s.hiddenWeekdays || []).map(Number).includes(w) ? '' : 'checked'}><span>${DOW[w]}</span></label>`).join('')}</div>
@@ -1819,6 +1831,8 @@ const actions = {
   'sched-tab': d => { state.schedTab = d.t; render(); },
   'slot-add': () => openSlotForm(false),
   'turn-days': d => { const f = document.querySelector('.turn-form'); if (!f) return; f.querySelectorAll('input[name="wd"]').forEach(i => { i.checked = d.d.includes(i.value); }); turnFormUpdate(); },
+  'quiet-toggle': () => toggleQuiet(),
+  'quiet-off-ok': () => { db.settings.quietMode = false; saveDB(); closeModal(); toast('🔔 Los socios vuelven a recibir avisos', 'ok'); render(); },
   'slot-del': d => openModal(`${modalHead('Quitar horario')}
     <p>Se eliminarán las próximas clases de este horario. Si hay clientes apuntados, se les cancela la reserva y se les devuelve la clase.</p>
     <div class="small">${notifyChecks(false, false)}</div>
@@ -1932,7 +1946,7 @@ const forms = {
       bookWindowDays: Number(f.get('bookWindowDays')), cancelHours: Number(f.get('cancelHours')),
       reminderHours: Number(f.get('reminderHours')), waitlistMax: Number(f.get('waitlistMax')), waitlistEnabled: f.get('waitlistEnabled') === 'on',
       publishMode: f.get('publishMode'), publishWeekday: Number(f.get('publishWeekday')), publishTime: f.get('publishTime') || '20:00',
-      weeklyLimit: Number(f.get('weeklyLimit')), emailOnPromote: f.get('emailOnPromote') === 'on', onePerDay: f.get('onePerDay') === 'on', silentAdminAdd: f.get('silentAdminAdd') === 'on',
+      weeklyLimit: Number(f.get('weeklyLimit')), emailOnPromote: f.get('emailOnPromote') === 'on', onePerDay: f.get('onePerDay') === 'on', silentAdminAdd: f.get('silentAdminAdd') === 'on', quietMode: f.get('quietMode') === 'on',
       hiddenWeekdays: [0, 1, 2, 3, 4, 5, 6].filter(w => !f.getAll('showDay').map(Number).includes(w)),
       autoMonthlyDue: f.get('autoMonthlyDue') === 'on', autoMonthlyDay: Math.min(28, Math.max(1, Number(f.get('autoMonthlyDay')) || 1)), autoMonthlyEmail: f.get('autoMonthlyEmail') === 'on',
     });

@@ -82,6 +82,7 @@ function splitHour(h) {
 }
 
 function viewAdminTurns() {
+  if (state.turnOpen) { const v = viewTurnDetail(); if (v) return v; }
   const hours = buildHours();
   const q = norm2(state.search);
   const withPeople = hours.filter(h => h.members.length);
@@ -113,8 +114,8 @@ function viewAdminTurns() {
       </div>`;
     };
     return `<div class="card turn-card ${h.members.length ? '' : 'is-empty'}" style="--c:${h.color}">
-      <div class="turn-head">
-        <div><div class="turn-title">TURNO ${hhmm(h.time)} <span>· ${DAYS_TXT(h.days.length)}</span></div>
+      <div class="turn-head clickable" data-a="turn-open" data-t="${h.time}" data-d="${h.days.join('')}" title="Abrir el turno en grande">
+        <div><div class="turn-title">TURNO ${hhmm(h.time)} <span>· ${DAYS_TXT(h.days.length)}</span> <span class="turn-open-ic">⤢</span></div>
           <div class="muted small">${h.days.map(w => DOW_LONG[w]).join(', ')}${h.members.length ? '' : ' · sin socios todavía'}</div></div>
         <div class="turn-nums">
           <div><b>${h.members.length}</b><span>${h.members.length === 1 ? 'socio' : 'socios'}</span></div>
@@ -128,6 +129,7 @@ function viewAdminTurns() {
       ${h.members.length ? `<div class="turn-members">${h.groups.map(g => `
         <div class="turn-sub"><span>${esc(g.label)}</span><span>${g.members.length}</span></div>
         ${g.members.map(row).join('')}`).join('')}</div>` : ''}
+      <button class="btn sm block" style="margin-top:10px" data-a="turn-open" data-t="${h.time}" data-d="${h.days.join('')}">⤢ Abrir en grande y organizar</button>
     </div>`;
   };
   return `
@@ -140,11 +142,102 @@ function viewAdminTurns() {
       <div class="card kpi money" style="--k:#E8890C"><div class="kpi-ic">🟢</div><div><div class="v">${totalFree}</div><div class="l">Huecos libres por semana</div></div></div>
       <div class="card kpi money clickable" style="--k:#C0392B" data-a="turns-noturn"><div class="kpi-ic">❓</div><div><div class="v">${noTurn.length}</div><div class="l">Socios sin turno</div></div></div>
     </div>
-    <p class="muted small" style="margin:0 0 8px">Las casillas de cada socio son los días que viene a esa hora. Pulsa una para apuntarle o quitarle ese día (sin enviarle avisos). Pulsa el nombre para abrir su ficha.</p>
+    <p class="muted small" style="margin:0 0 8px">Pulsa un turno para abrirlo en grande y organizarlo. Las casillas de cada socio son los días que viene a esa hora: pulsa una para apuntarle o quitarle ese día (sin enviarle avisos).</p>
     <input class="search" placeholder="Buscar un socio en los turnos…" value="${esc(state.search)}" data-input="search">
     ${shown.length ? `<div class="turn-grid">${shown.map(card).join('')}</div>`
       : `<div class="card empty">${q ? 'Ningún turno tiene a ese socio.' : 'Todavía no hay turnos con socios. Mete a los socios en sus grupos desde Clientes (☑️ Seleccionar → 👥 Meter en grupo) o desde Clases.'}</div>`}`;
 }
+
+// ---------- Turno en grande ----------
+// Busca el turno abierto; si al reorganizar han cambiado sus días, el que más se le parezca a esa hora
+function findTurn(hours, open) {
+  const same = hours.filter(h => h.time === open.time);
+  return same.find(h => h.days.join('') === open.days) ||
+    same.map(h => ({ h, n: h.days.filter(w => open.days.includes(String(w))).length })).sort((a, b) => b.n - a.n)[0]?.h || null;
+}
+
+function viewTurnDetail() {
+  const hours = buildHours();
+  const h = findTurn(hours, state.turnOpen);
+  if (!h) { state.turnOpen = null; return ''; }
+  state.turnOpen = { time: h.time, days: h.days.join('') };
+  const nDays = fixedDaysCount();
+  const others = hours.filter(x => x.time === h.time && x !== h);
+  const inTurn = new Set(h.members.map(m => m.u.id));
+  const q = norm2(state.turnAddQ || '');
+  const cands = q ? realClients().filter(c => c.active && !inTurn.has(c.id) && norm2(c.name).includes(q)).slice(0, 8) : [];
+  const freeCls = h.free <= 0 ? 'danger' : h.free <= 3 ? 'warn' : 'ok';
+  const dl = days => days.map(w => DAY_LETTER[w]).join('-');
+  const dayTxt = dl(h.days);
+  let i = 0;
+  const row = m => {
+    const p = getPlan(m.u.planId);
+    const total = nDays[m.u.id] || 0;
+    const tooMany = p?.type === 'weekly' && p.perWeek && total > p.perWeek;
+    const set = new Set(m.days);
+    i++;
+    return `<div class="td-row">
+      <span class="n">${i}</span>
+      <div class="td-name"><button class="linkish" data-a="client-open" data-id="${m.u.id}">${esc(m.u.name)}</button>
+        <div class="muted small">${p ? esc(p.name) : 'Sin tarifa'}${tooMany ? ` · <span class="mtag warn">${total} días con tarifa de ${p.perWeek}</span>` : ''}${m.other.length ? ` · <span class="mtag">también ${dl(m.other)} en el otro turno</span>` : ''}${m.u.blocked ? ' · <span class="mtag danger">🔒 Bloqueado</span>' : m.u.paymentDue ? ' · <span class="mtag warn">💶 Cuota pendiente</span>' : ''}</div></div>
+      <span class="turn-dbox td-days">${h.perDay.map(d => `<button class="${set.has(d.w) ? 'on' : ''}" data-a="turn-day" data-t="${h.time}" data-w="${d.w}" data-id="${m.u.id}" title="${set.has(d.w) ? 'Viene' : 'No viene'} el ${DOW_LONG[d.w].toLowerCase()} · pulsa para ${set.has(d.w) ? 'quitarle' : 'apuntarle'}">${DAY_LETTER[d.w]}</button>`).join('')}</span>
+      <div class="td-acts">
+        ${others.map(o => `<button class="btn sm" data-a="turn-move-to" data-id="${m.u.id}" data-t="${h.time}" data-from="${h.days.join('')}" data-to="${o.days.join('')}" title="Le quita de ${dayTxt} y le apunta a ${dl(o.days)}">→ ${dl(o.days)}</button>`).join('')}
+        <button class="btn sm ghost" data-a="turn-remove" data-id="${m.u.id}" data-t="${h.time}" data-d="${h.days.join('')}" title="Quitarle de este turno">✕ Quitar</button>
+      </div>
+    </div>`;
+  };
+  return `
+    <div class="page-title"><div><button class="btn sm ghost" data-a="turn-close">← Todos los turnos</button>
+      <h1 style="margin-top:8px">Turno ${hhmm(h.time)} · ${DAYS_TXT(h.days.length)}</h1>
+      <div class="muted">${h.days.map(w => DOW_LONG[w]).join(', ')}</div></div>
+      <div class="turn-nums"><div><b>${h.members.length}</b><span>${h.members.length === 1 ? 'socio' : 'socios'}</span></div><div><b class="${freeCls}">${h.free}</b><span>huecos/sem.</span></div></div></div>
+    <div class="quiet-note">🔕 Lo que cambies aquí <b>nunca avisa</b> a los socios: ni correo ni aviso en la app. Si quitas a alguien de un día, se le cancelan en silencio sus próximas clases de ese día.</div>
+    ${others.length ? `<div class="row wrap" style="gap:6px;margin:0 0 12px"><span class="muted small">Otros turnos a las ${hhmm(h.time)}:</span>${others.map(o => `<button class="btn sm" data-a="turn-open" data-t="${o.time}" data-d="${o.days.join('')}">${DAYS_TXT(o.days.length)} (${dl(o.days)}) · ${o.members.length}</button>`).join('')}</div>` : ''}
+    <div class="td-dayscards" style="--n:${h.days.length}">${h.perDay.map(d => `<div class="card td-day ${d.free < 0 ? 'over' : d.free === 0 ? 'full' : ''}" style="--c:${h.color}">
+      <div class="td-day-h">${DOW_LONG[d.w]}</div>
+      <div class="td-day-n"><b>${d.used}</b>/${d.cap}</div>
+      <div class="muted small">${d.free < 0 ? `${-d.free} por encima del aforo` : d.free === 0 ? 'Completo' : `${d.free} ${d.free === 1 ? 'hueco' : 'huecos'}`}</div>
+      <label class="small td-cap">Plazas <input type="number" min="1" max="99" value="${d.cap}" data-change="turn-cap" data-id="${d.t.id}"></label>
+      <button class="btn sm ghost block" data-a="slot-open" data-id="${d.t.id}">Grupo y clases del ${DOW_LONG[d.w].toLowerCase()}</button>
+    </div>`).join('')}</div>
+    <div class="card" style="margin-top:14px">
+      <div class="section-h" style="margin-top:0">Añadir socios a este turno</div>
+      <input class="search" style="margin:0" placeholder="Escribe un nombre para añadirlo a ${dayTxt} a las ${hhmm(h.time)}…" value="${esc(state.turnAddQ || '')}" data-input="turnadd">
+      ${q ? (cands.length ? `<div class="td-cands">${cands.map(c => { const g = groupsOf(c.id); return `<div class="td-cand"><div class="grow"><b>${esc(c.name)}</b><div class="muted small">${g.length ? 'Ahora: ' + esc([...new Set(g.map(t => `${DAY_LETTER[t.weekday]} ${hhmm(t.time)}`))].join(', ')) : 'Sin turno'}</div></div>
+        <button class="btn sm primary" data-a="turn-add" data-id="${c.id}" data-t="${h.time}" data-d="${h.days.join('')}">+ Añadir (${dayTxt})</button></div>`; }).join('')}</div>`
+        : '<p class="muted small" style="margin:8px 0 0">No hay nadie con ese nombre fuera de este turno.</p>') : ''}
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="section-h" style="margin-top:0">Socios del turno</div>
+      ${h.members.length ? h.groups.map(g => `<div class="turn-sub"><span>${esc(g.label)}</span><span>${g.members.length}</span></div>${g.members.map(row).join('')}`).join('')
+        : '<p class="muted">Todavía no hay nadie en este turno. Añádelos arriba.</p>'}
+    </div>`;
+}
+
+// Apunta a un socio a varios días a esa hora / le quita de ellos (siempre sin avisos)
+function setTurnDays(userId, time, add = [], remove = []) {
+  remove.forEach(w => { const t = db.schedule.find(s => s.time === time && s.weekday === w); if (t && (t.members || []).includes(userId)) removeGroupMember(t.id, userId, { removeFuture: true, email: false, app: false }); });
+  add.forEach(w => { const t = db.schedule.find(s => s.time === time && s.weekday === w); if (t && !(t.members || []).includes(userId)) addGroupMember(t.id, userId, { email: false, app: false }); });
+  saveDB();
+}
+const keepScroll = fn => { const y = window.scrollY; fn(); render(); window.scrollTo(0, y); };
+const daysOf = str => String(str).split('').map(Number);
+
+document.addEventListener('input', e => {
+  if (e.target.dataset?.input !== 'turnadd') return;
+  state.turnAddQ = e.target.value;
+  const pos = e.target.selectionStart;
+  keepScroll(() => {});
+  const inp = document.querySelector('[data-input="turnadd"]'); if (inp) { inp.focus(); inp.setSelectionRange(pos, pos); }
+});
+document.addEventListener('change', e => {
+  if (e.target.dataset?.change !== 'turn-cap') return;
+  const t = getSlot(e.target.dataset.id); if (!t) return;
+  const v = Math.max(1, Number(e.target.value) || 0), ct = getClassType(t.classTypeId);
+  keepScroll(() => setSlotCapacity(t.id, v === ct.capacity ? null : v));
+  toast(`${DOW_LONG[t.weekday]} ${hhmm(t.time)}: ${v} plazas`, 'ok');
+});
 
 // Apunta o quita a un socio de un día concreto a una hora (sin avisos)
 function toggleTurnDay(userId, time, weekday) {
@@ -189,6 +282,23 @@ function printTurns() {
 Object.assign(actions, {
   'turns-empty': () => { state.turnsShowEmpty = !state.turnsShowEmpty; render(); },
   'turns-print': () => printTurns(),
+  'turn-open': d => { state.turnOpen = { time: d.t, days: d.d }; state.turnAddQ = ''; render(); window.scrollTo(0, 0); },
+  'turn-close': () => { state.turnOpen = null; state.turnAddQ = ''; render(); window.scrollTo(0, 0); },
+  'turn-add': d => {
+    const u = getUser(d.id);
+    state.turnAddQ = ''; keepScroll(() => setTurnDays(d.id, d.t, daysOf(d.d)));
+    toast(`${u.name.split(' ')[0]} añadido a ${daysOf(d.d).map(w => DAY_LETTER[w]).join('-')} ${hhmm(d.t)} (sin avisarle)`, 'ok');
+  },
+  'turn-move-to': d => {
+    const u = getUser(d.id), to = daysOf(d.to);
+    keepScroll(() => setTurnDays(d.id, d.t, to, daysOf(d.from).filter(w => !to.includes(w))));
+    toast(`${u.name.split(' ')[0]} pasado a ${to.map(w => DAY_LETTER[w]).join('-')} ${hhmm(d.t)} (sin avisarle)`, 'ok');
+  },
+  'turn-remove': d => {
+    const u = getUser(d.id);
+    confirmModal('Quitar del turno', `¿Quitar a <b>${esc(u.name)}</b> del turno de las ${hhmm(d.t)} (${daysOf(d.d).map(w => DAY_LETTER[w]).join('-')})? Se le cancelan en silencio sus próximas clases de esos días. No se le avisa.`, `data-a="turn-remove-ok" data-id="${d.id}" data-t="${d.t}" data-d="${d.d}"`, 'Quitar');
+  },
+  'turn-remove-ok': d => { closeModal(); keepScroll(() => setTurnDays(d.id, d.t, [], daysOf(d.d))); toast('Quitado del turno (sin avisarle)', 'ok'); },
   'turn-day': d => { const y = window.scrollY; toggleTurnDay(d.id, d.t, Number(d.w)); render(); window.scrollTo(0, y); },
   'turns-noturn': () => { state.view = 'a-clients'; state.clientsTab = 'clients'; state.clientFilter = 'nogroup'; state.search = ''; render(); window.scrollTo(0, 0); },
 });

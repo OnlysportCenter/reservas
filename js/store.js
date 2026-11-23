@@ -453,7 +453,11 @@ function carryOverWeek(userId, d, { email = false, app = true } = {}) {
 }
 
 // ---------- Notificaciones y correo ----------
+// Modo «No avisar a nadie»: mientras está activo no se manda ningún aviso ni correo a los socios
+// (salvo lo que el administrador envía a propósito, como la invitación a la app). El servidor hace lo mismo.
+const quietMode = () => !!db.settings.quietMode;
 function notify(userId, text, type = 'info') {
+  if (quietMode()) return;
   if (getUser(userId)?.isPlaceholder) return;   // los comodines no tienen app
   db.notifications.push({ id: uid(), userId, text, type, date: new Date().toISOString(), read: false });
 }
@@ -464,7 +468,8 @@ function notificationsFor(userId) {
   return db.notifications.filter(n => n.userId === userId).sort((a, b) => b.date.localeCompare(a.date));
 }
 // Prototipo: el correo se guarda en una bandeja simulada. Con servidor real se enviará de verdad.
-function sendEmail(userId, subject, body) {
+function sendEmail(userId, subject, body, { force = false } = {}) {
+  if (quietMode() && !force) return;
   const u = getUser(userId);
   if (!u || u.isPlaceholder || !u.email) return;   // sin correo (comodines)
   db.emails.push({ id: uid(), userId, to: u.email, subject, body, date: new Date().toISOString() });
@@ -481,7 +486,7 @@ function inviteText(u) {
 function inviteUser(userId) {
   const u = getUser(userId);
   if (!u || u.isPlaceholder || !u.email || u.role !== 'client') return false;
-  sendEmail(userId, `Tu app de reservas de ${db.settings.centerName || 'Onlysport Center'}`, inviteText(u));
+  sendEmail(userId, `Tu app de reservas de ${db.settings.centerName || 'Onlysport Center'}`, inviteText(u), { force: true });   // la invitación la mandas tú a propósito
   u.invitedAt = new Date().toISOString();
   return true;
 }
